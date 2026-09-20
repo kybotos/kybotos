@@ -50,6 +50,8 @@ hostapi_event_t s_evq[kEventQueueDepth];
 int s_evq_head = 0;
 int s_evq_count = 0;
 bool s_down_delivered = false; // DOWN を配送済みか(孤児 UP の抑止)
+int16_t s_last_x = 0;          // 最後に配送した座標(MOVE の間引きの基準)
+int16_t s_last_y = 0;
 portMUX_TYPE s_evq_mux = portMUX_INITIALIZER_UNLOCKED;
 
 void event_queue_reset()
@@ -58,6 +60,8 @@ void event_queue_reset()
     s_evq_head = 0;
     s_evq_count = 0;
     s_down_delivered = false;
+    s_last_x = 0;
+    s_last_y = 0;
     portEXIT_CRITICAL(&s_evq_mux);
 }
 
@@ -68,11 +72,40 @@ void push_event(uint16_t type, int16_t x, int16_t y)
 
     portENTER_CRITICAL(&s_evq_mux);
     // アプリ起動タップの UP がアプリに漏れないよう、DOWN 未配送の UP は捨てる
-    if (type == HOSTAPI_EV_TOUCH_UP && !s_down_delivered) {
+    // (MOVE も同様。shared/hostapi_defs.h の配送規則)
+    if ((type == HOSTAPI_EV_TOUCH_UP || type == HOSTAPI_EV_TOUCH_MOVE)
+        && !s_down_delivered) {
         portEXIT_CRITICAL(&s_evq_mux);
         return;
     }
+    if (type == HOSTAPI_EV_TOUCH_MOVE) {
+        // 一定量動いたときだけ配送する(間引き)
+        const int dx = (int)x - (int)s_last_x;
+        const int dy = (int)y - (int)s_last_y;
+        if ((dx < 0 ? -dx : dx) < HOSTAPI_TOUCH_MOVE_MIN_PX
+            && (dy < 0 ? -dy : dy) < HOSTAPI_TOUCH_MOVE_MIN_PX) {
+            portEXIT_CRITICAL(&s_evq_mux);
+            return;
+        }
+        // 末尾が MOVE なら上書きする(畳み込み。MOVE でキューを溢れさせない)
+        if (s_evq_count > 0) {
+            hostapi_event_t& tail = s_evq[(s_evq_head + s_evq_count - 1) % kEventQueueDepth];
+            if (tail.type == HOSTAPI_EV_TOUCH_MOVE) {
+                tail.x = x;
+                tail.y = y;
+                tail.time_ms = now;
+                s_last_x = x;
+                s_last_y = y;
+                portEXIT_CRITICAL(&s_evq_mux);
+                return;
+            }
+        }
+    }
     if (type == HOSTAPI_EV_TOUCH_DOWN) s_down_delivered = true;
+    if (type != HOSTAPI_EV_TOUCH_UP) {
+        s_last_x = x;
+        s_last_y = y;
+    }
 
     if (s_evq_count == kEventQueueDepth) { // 満杯: 最古を捨てる
         s_evq_head = (s_evq_head + 1) % kEventQueueDepth;
@@ -104,6 +137,10 @@ void screen_input_event_cb(lv_event_t* e)
         push_event(HOSTAPI_EV_TOUCH_DOWN, (int16_t)p.x, (int16_t)p.y);
     } else if (code == LV_EVENT_RELEASED) {
         push_event(HOSTAPI_EV_TOUCH_UP, (int16_t)p.x, (int16_t)p.y);
+    } else if (code == LV_EVENT_PRESSING) {
+        // Phase 18a: 押下中の移動。LVGL の描画周期ごとに来るので、
+        // push_event 側の間引き(8px)と畳み込みでキューを守る
+        push_event(HOSTAPI_EV_TOUCH_MOVE, (int16_t)p.x, (int16_t)p.y);
     }
 }
 
@@ -541,6 +578,7 @@ void hostapi_app_screen_create()
     // アプリ実行中のタッチはこのスクリーンで受けてイベントキューへ流す
     lv_obj_add_event_cb(s_screen, screen_input_event_cb, LV_EVENT_PRESSED, nullptr);
     lv_obj_add_event_cb(s_screen, screen_input_event_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(s_screen, screen_input_event_cb, LV_EVENT_PRESSING, nullptr);
     lv_screen_load(s_screen);
     lvgl_port_unlock();
     event_queue_reset();

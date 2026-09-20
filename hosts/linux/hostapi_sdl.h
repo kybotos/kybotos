@@ -18,6 +18,9 @@ void host_sdl_clear_slots(void);
 /* 入力イベントキュー (Phase 6A)。main ループがマウスイベントを push し、
  * アプリが hostapi_poll_event で drain する。アプリ切り替え時に clear */
 void host_sdl_push_touch(bool down, int x, int y);
+/* Phase 18a: 押下中の移動(スワイプ用)。間引き・畳み込みは実装側で行う
+ * (規則は shared/hostapi_defs.h。実機の LV_EVENT_PRESSING に相当) */
+void host_sdl_push_touch_move(int x, int y);
 void host_sdl_clear_events(void);
 
 /* オーディオ停止+状態リセット (Phase 6B ライフサイクル契約)。

@@ -13,6 +13,7 @@ struct PowerKeyConfig {
     uint32_t   debounce_ms        = 50;          // Debounce
     uint32_t   hold_ms            = 2000;        // Long-press shutdown threshold (ms)
     uint32_t   short_press_max_ms = 500;         // Release within this = short press
+    uint32_t   force_home_min_ms  = 1000;        // Release after this = forced home (Phase 18a)
     uint32_t   poll_period_ms     = 10;          // Poll period when using a task
     bool       use_deepsleep_hold = true;        // Keep level during deep sleep after OFF
 };
@@ -40,6 +41,15 @@ public:
         short_press_arg_ = arg;
     }
 
+    // Forced-home callback (Phase 18a). Fires on release when the key was held
+    // for at least force_home_min_ms (battery mode cuts power at hold_ms while
+    // still pressed, so that path wins there). Same constraints as above:
+    // runs on the power-key task, keep it tiny.
+    void set_on_force_home(ShortPressCb cb, void* arg) noexcept {
+        on_force_home_ = cb;
+        force_home_arg_ = arg;
+    }
+
     const PowerKeyConfig& config() const noexcept { return cfg_; }
     void set_config(const PowerKeyConfig& cfg) noexcept { cfg_ = cfg; }
 
@@ -60,6 +70,8 @@ private:
     TickType_t press_start_       = 0;
     ShortPressCb on_short_press_  = nullptr;
     void*      short_press_arg_   = nullptr;
+    ShortPressCb on_force_home_   = nullptr;
+    void*      force_home_arg_    = nullptr;
     volatile bool shutdown_issued_ = false;
     TaskHandle_t task_            = nullptr;
 };

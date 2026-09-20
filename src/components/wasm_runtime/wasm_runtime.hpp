@@ -20,6 +20,16 @@ bool app_start(const char* path, AppStoppedCb on_stopped);
 // 実行中アプリに停止を要求する(非同期。停止完了は on_stopped で通知)。
 void app_request_stop();
 
+// Phase 18a: 戻るキー(電源キー短押し)を実行中アプリへ渡すよう要求する。
+// 実際の配送は app_tick の切れ目で行われ、アプリが任意 export app_key() を
+// 持たない / 0 を返した場合は app_request_stop() と同じ停止になる。
+// 割り込み・小スタックのタスクから呼べる(atomic フラグを立てるだけ)。
+void app_request_key_back();
+
+// Phase 18a: 強制ホーム(キー 1〜2 秒の長押し)。アプリに聞かずに停止する。
+// app_request_stop() との違いはログ 1 行だけ(切り分け用)。
+void app_request_force_home();
+
 bool app_is_running();
 
 } // namespace wasmrt

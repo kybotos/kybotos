@@ -1,0 +1,310 @@
+//! タップ / 長押し / スワイプの判定(`docs/design/ui-conventions.md`)。
+//!
+//! 入力は `hostapi_poll_event` のイベント(DOWN / MOVE / UP)と `hostapi_now_ms`。
+//! `app_tick` は 100ms 周期なので、長押しの成立はイベントではなく [`Gesture::tick`]
+//! で検出する(指を止めたままなら MOVE は来ないため)。
+//!
+//! **意味づけはアプリの仕事**。ここは「何が起きたか」だけを返す。たとえば
+//! 長押しに意味が無い場面では、アプリが [`Action::LongPressFired`] をタップと
+//! 同じに扱い、点滅も出さなければよい。
+
+/// `shared/hostapi_defs.h` の `HOSTAPI_EV_*`(この crate はホストに依存しないので写しを持つ)
+pub const EV_TOUCH_DOWN: u16 = 1;
+pub const EV_TOUCH_UP: u16 = 2;
+pub const EV_TOUCH_MOVE: u16 = 3;
+
+/// タップと認める最大移動量(論理 px)
+pub const TAP_MAX_MOVE: i32 = 12;
+/// 長押しの成立時間(ms)
+pub const LONG_PRESS_MS: u32 = 600;
+/// スワイプ(スクロール)と認める最小移動量(論理 px)
+pub const SWIPE_MIN_MOVE: i32 = 24;
+
+/// 判定の結果。1 イベント / 1 tick につき 1 つ返る
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Action {
+    /// 何も確定していない
+    None,
+    /// 押された(押下時の状態を控えるための通知。スクロールの基準など)
+    Press { x: i32, y: i32 },
+    /// タップ(移動が小さいまま離した)
+    Tap { x: i32, y: i32 },
+    /// 長押しが成立した(**まだ実行しない**。点滅を始める合図)
+    LongPressArmed { x: i32, y: i32 },
+    /// 長押しのまま離した(ここで実行する)
+    LongPressFired { x: i32, y: i32 },
+    /// 縦スワイプ中。`dy` は**押下位置からの累積移動量**(下が正)
+    Scroll { dy: i32 },
+    /// 長押し / タップが取り消された(スワイプに移行、または横方向へ動いた)
+    Cancel,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum State {
+    Idle,
+    /// 押下中。まだタップにも長押しにもスワイプにもなっていない
+    Pressed,
+    /// 長押しが成立した(離せば実行)
+    Armed,
+    /// 縦スワイプ中
+    Scrolling,
+    /// この押下ではもう何も起こさない(横スワイプ)
+    Dead,
+}
+
+/// 押下 1 回ぶんの状態機械。アプリが 1 つ持てばよい(シングルタッチ)
+#[derive(Clone, Copy)]
+pub struct Gesture {
+    state: State,
+    x: i32,
+    y: i32,
+    t: u32,
+    /// まだタップ / 長押しになりうるか(少しでも大きく動いたら false)
+    tap_ok: bool,
+}
+
+impl Default for Gesture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `u32` の時刻は wrap しうるので、差を符号付きで見る
+fn elapsed(now: u32, since: u32) -> i32 {
+    now.wrapping_sub(since) as i32
+}
+
+impl Gesture {
+    pub const fn new() -> Gesture {
+        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true }
+    }
+
+    /// 長押しが成立していて、まだ離していないか(点滅させるかの判断に使う)
+    pub fn armed(&self) -> bool {
+        matches!(self.state, State::Armed)
+    }
+
+    /// 押下中の座標(押した位置)。離していれば `None`
+    pub fn press_pos(&self) -> Option<(i32, i32)> {
+        match self.state {
+            State::Idle => None,
+            _ => Some((self.x, self.y)),
+        }
+    }
+
+    /// 縦スワイプ中か
+    pub fn scrolling(&self) -> bool {
+        matches!(self.state, State::Scrolling)
+    }
+
+    /// 入力イベントを 1 件食わせる
+    pub fn on_event(&mut self, ev_type: u16, x: i32, y: i32, time_ms: u32) -> Action {
+        match ev_type {
+            EV_TOUCH_DOWN => {
+                self.state = State::Pressed;
+                self.x = x;
+                self.y = y;
+                self.t = time_ms;
+                self.tap_ok = true;
+                Action::Press { x, y }
+            }
+            EV_TOUCH_MOVE => self.on_move(x, y),
+            EV_TOUCH_UP => self.on_up(),
+            _ => Action::None, // 未知の type は無視する(ABI の契約)
+        }
+    }
+
+    fn on_move(&mut self, x: i32, y: i32) -> Action {
+        let dx = x - self.x;
+        let dy = y - self.y;
+        match self.state {
+            State::Idle | State::Dead => Action::None,
+            State::Scrolling => Action::Scroll { dy },
+            State::Pressed | State::Armed => {
+                if dy.abs() >= SWIPE_MIN_MOVE && dy.abs() > dx.abs() {
+                    // 縦スワイプへ移行(長押しが成立していたら取り消される)
+                    self.state = State::Scrolling;
+                    self.tap_ok = false;
+                    Action::Scroll { dy }
+                } else if dx.abs() >= SWIPE_MIN_MOVE {
+                    // 横スワイプは v1 では使わない。ただしタップ / 長押しは取り消す
+                    self.state = State::Dead;
+                    self.tap_ok = false;
+                    Action::Cancel
+                } else if dx.abs() > TAP_MAX_MOVE || dy.abs() > TAP_MAX_MOVE {
+                    // デッドゾーン(タップには大きすぎ、スワイプには足りない)。
+                    // **ここで押下を終わらせない**。MOVE は刻んで届くので、
+                    // 終わらせるとスワイプ閾値に届く前に打ち切られる(Phase 18a で踏んだ)
+                    let announce = self.tap_ok || self.state == State::Armed;
+                    self.state = State::Pressed;
+                    self.tap_ok = false;
+                    if announce {
+                        Action::Cancel
+                    } else {
+                        Action::None
+                    }
+                } else {
+                    Action::None
+                }
+            }
+        }
+    }
+
+    fn on_up(&mut self) -> Action {
+        let (x, y) = (self.x, self.y);
+        let state = self.state;
+        self.state = State::Idle;
+        match state {
+            State::Armed => Action::LongPressFired { x, y },
+            State::Pressed if self.tap_ok => Action::Tap { x, y },
+            _ => Action::None,
+        }
+    }
+
+    /// 毎 `app_tick` に呼ぶ。長押しの成立はここで検出する
+    pub fn tick(&mut self, now_ms: u32) -> Action {
+        if self.state == State::Pressed
+            && self.tap_ok
+            && elapsed(now_ms, self.t) >= LONG_PRESS_MS as i32
+        {
+            self.state = State::Armed;
+            return Action::LongPressArmed { x: self.x, y: self.y };
+        }
+        Action::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn down(g: &mut Gesture, x: i32, y: i32, t: u32) -> Action {
+        g.on_event(EV_TOUCH_DOWN, x, y, t)
+    }
+    fn mv(g: &mut Gesture, x: i32, y: i32, t: u32) -> Action {
+        g.on_event(EV_TOUCH_MOVE, x, y, t)
+    }
+    fn up(g: &mut Gesture, x: i32, y: i32, t: u32) -> Action {
+        g.on_event(EV_TOUCH_UP, x, y, t)
+    }
+
+    #[test]
+    fn tap_is_reported_on_release() {
+        let mut g = Gesture::new();
+        assert_eq!(down(&mut g, 10, 20, 100), Action::Press { x: 10, y: 20 });
+        assert_eq!(g.tick(150), Action::None);
+        assert_eq!(up(&mut g, 11, 21, 200), Action::Tap { x: 10, y: 20 });
+        assert!(g.press_pos().is_none());
+    }
+
+    #[test]
+    fn small_move_still_taps() {
+        let mut g = Gesture::new();
+        down(&mut g, 10, 20, 0);
+        assert_eq!(mv(&mut g, 18, 28, 50), Action::None); // 8px は許容内
+        assert_eq!(up(&mut g, 18, 28, 100), Action::Tap { x: 10, y: 20 });
+    }
+
+    #[test]
+    fn long_press_arms_then_fires_on_release() {
+        let mut g = Gesture::new();
+        down(&mut g, 10, 20, 1000);
+        assert_eq!(g.tick(1000 + LONG_PRESS_MS - 1), Action::None);
+        assert_eq!(g.tick(1000 + LONG_PRESS_MS), Action::LongPressArmed { x: 10, y: 20 });
+        assert!(g.armed());
+        assert_eq!(g.tick(1000 + LONG_PRESS_MS + 100), Action::None); // 成立は 1 回だけ
+        assert_eq!(up(&mut g, 10, 20, 2000), Action::LongPressFired { x: 10, y: 20 });
+        assert!(!g.armed());
+    }
+
+    #[test]
+    fn long_press_is_cancelled_by_swipe() {
+        let mut g = Gesture::new();
+        down(&mut g, 10, 100, 0);
+        assert_eq!(g.tick(LONG_PRESS_MS), Action::LongPressArmed { x: 10, y: 100 });
+        // 成立後に縦へ動かすとスクロールへ移行し、離しても実行されない
+        assert_eq!(mv(&mut g, 10, 100 + SWIPE_MIN_MOVE, 700), Action::Scroll { dy: SWIPE_MIN_MOVE });
+        assert!(!g.armed());
+        assert!(g.scrolling());
+        assert_eq!(up(&mut g, 10, 124, 800), Action::None);
+    }
+
+    #[test]
+    fn long_press_does_not_arm_after_dead_zone_move() {
+        let mut g = Gesture::new();
+        down(&mut g, 10, 100, 0);
+        assert_eq!(mv(&mut g, 10, 100 + TAP_MAX_MOVE + 1, 100), Action::Cancel);
+        assert_eq!(mv(&mut g, 10, 100 + TAP_MAX_MOVE + 2, 150), Action::None); // 通知は 1 回だけ
+        assert_eq!(g.tick(LONG_PRESS_MS), Action::None); // もう成立しない
+        assert_eq!(up(&mut g, 10, 113, 700), Action::None); // タップにもならない
+    }
+
+    /// MOVE は刻んで届く。デッドゾーンを通過してからスワイプ閾値に達する経路
+    /// (実際の指・xdotool の連続 mousemove はこの形になる)
+    #[test]
+    fn incremental_moves_still_become_a_swipe() {
+        let mut g = Gesture::new();
+        down(&mut g, 150, 180, 0);
+        assert_eq!(mv(&mut g, 150, 160, 100), Action::Cancel); // 20px = デッドゾーン
+        assert_eq!(mv(&mut g, 150, 140, 200), Action::Scroll { dy: -40 });
+        assert!(g.scrolling());
+        assert_eq!(mv(&mut g, 150, 60, 300), Action::Scroll { dy: -120 });
+        assert_eq!(up(&mut g, 150, 60, 400), Action::None);
+    }
+
+    #[test]
+    fn vertical_swipe_reports_cumulative_dy() {
+        let mut g = Gesture::new();
+        down(&mut g, 100, 200, 0);
+        assert_eq!(mv(&mut g, 100, 200 - SWIPE_MIN_MOVE, 50), Action::Scroll { dy: -SWIPE_MIN_MOVE });
+        assert_eq!(mv(&mut g, 100, 150, 100), Action::Scroll { dy: -50 });
+        assert_eq!(mv(&mut g, 104, 120, 150), Action::Scroll { dy: -80 }); // 横のぶれは無視
+        assert_eq!(up(&mut g, 104, 120, 200), Action::None);
+    }
+
+    #[test]
+    fn horizontal_swipe_is_ignored_but_cancels() {
+        let mut g = Gesture::new();
+        down(&mut g, 100, 200, 0);
+        assert_eq!(mv(&mut g, 100 + SWIPE_MIN_MOVE, 202, 50), Action::Cancel);
+        assert_eq!(mv(&mut g, 100 + SWIPE_MIN_MOVE * 2, 202, 100), Action::None);
+        assert_eq!(up(&mut g, 148, 202, 150), Action::None);
+    }
+
+    #[test]
+    fn diagonal_prefers_the_dominant_axis() {
+        let mut g = Gesture::new();
+        down(&mut g, 100, 200, 0);
+        // 縦のほうが大きいので縦スクロール
+        assert_eq!(mv(&mut g, 110, 240, 50), Action::Scroll { dy: 40 });
+        assert!(g.scrolling());
+    }
+
+    #[test]
+    fn orphan_move_and_up_are_ignored() {
+        let mut g = Gesture::new();
+        assert_eq!(mv(&mut g, 10, 10, 0), Action::None);
+        assert_eq!(up(&mut g, 10, 10, 10), Action::None);
+        assert_eq!(g.tick(10_000), Action::None);
+    }
+
+    #[test]
+    fn unknown_event_type_is_ignored() {
+        let mut g = Gesture::new();
+        down(&mut g, 10, 20, 0);
+        assert_eq!(g.on_event(999, 0, 0, 10), Action::None);
+        assert_eq!(up(&mut g, 10, 20, 50), Action::Tap { x: 10, y: 20 });
+    }
+
+    #[test]
+    fn time_wraparound_is_handled() {
+        let mut g = Gesture::new();
+        let t0 = u32::MAX - 100;
+        down(&mut g, 10, 20, t0);
+        assert_eq!(g.tick(t0.wrapping_add(LONG_PRESS_MS - 1)), Action::None);
+        assert_eq!(
+            g.tick(t0.wrapping_add(LONG_PRESS_MS)),
+            Action::LongPressArmed { x: 10, y: 20 }
+        );
+    }
+}

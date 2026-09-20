@@ -1,5 +1,6 @@
 #include "wasm_runtime.hpp"
 #include "hostapi.hpp"
+#include "hostapi_defs.h" // Phase 18a: HOSTAPI_KEY_*
 
 #include "wasm_export.h"
 
@@ -112,6 +113,9 @@ namespace {
 enum class AppState { Idle, Running, StopRequested };
 
 std::atomic<AppState> s_app_state{AppState::Idle};
+// Phase 18a: 戻るキーの要求(power_key タスク → アプリスレッド)
+std::atomic<bool> s_key_back_req{false};
+std::atomic<bool> s_force_home_req{false};
 char s_app_path[160];
 AppStoppedCb s_on_stopped = nullptr;
 char s_app_error[160];
@@ -146,6 +150,8 @@ uint8_t* read_wasm_file(const char* path, uint32_t* out_size)
 
 void* app_thread(void*)
 {
+    s_key_back_req.store(false); // 起動前に押されていたぶんは持ち越さない
+    s_force_home_req.store(false);
     const size_t free_int_at_start = heap_caps_get_free_size(kCapsInt);
     const size_t free_psram_at_start = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     const char* error = nullptr;
@@ -213,6 +219,8 @@ void* app_thread(void*)
         wasm_function_inst_t fn_init = wasm_runtime_lookup_function(inst, "app_init");
         wasm_function_inst_t fn_tick = wasm_runtime_lookup_function(inst, "app_tick");
         wasm_function_inst_t fn_exit = wasm_runtime_lookup_function(inst, "app_exit");
+        // Phase 18a: 任意 export。無ければキーはホストの既定動作(停止)になる
+        wasm_function_inst_t fn_key = wasm_runtime_lookup_function(inst, "app_key");
         if (!fn_init || !fn_tick) {
             error = "app_init/app_tick not exported";
             break;
@@ -245,6 +253,38 @@ void* app_thread(void*)
                 break;
             }
             const int64_t end_us = esp_timer_get_time();
+
+            // Phase 18a: 強制ホームはアプリに聞かずに止める(脱出路)
+            if (s_force_home_req.exchange(false)) {
+                ESP_LOGI(TAG, "app: forced home");
+                AppState expected = AppState::Running;
+                s_app_state.compare_exchange_strong(expected, AppState::StopRequested);
+                break;
+            }
+
+            // Phase 18a: 戻るキーは app_tick の切れ目で配送する(同一スレッド・
+            // 再入なし)。app_key が 0 を返す / export が無ければ既定動作 = 停止。
+            if (s_key_back_req.exchange(false)) {
+                bool handled = false;
+                if (fn_key) {
+                    uint32_t kargv[2] = {(uint32_t)HOSTAPI_KEY_BACK,
+                                         (uint32_t)HOSTAPI_KEY_ACTION_CLICK};
+                    if (wasm_runtime_call_wasm(exec_env, fn_key, 2, kargv)) {
+                        handled = (kargv[0] != 0);
+                    } else {
+                        snprintf(s_app_error, sizeof(s_app_error), "app_key: %s",
+                                 wasm_runtime_get_exception(inst));
+                        error = s_app_error;
+                        break;
+                    }
+                }
+                ESP_LOGI(TAG, "app: key back -> %s", handled ? "handled" : "stop");
+                if (!handled) {
+                    AppState expected = AppState::Running;
+                    s_app_state.compare_exchange_strong(expected, AppState::StopRequested);
+                    break;
+                }
+            }
 
             // Phase 4 由来の計測(常設): 最初の kJitterSamples 回の統計
             if (sample_idx < kJitterSamples) {
@@ -339,6 +379,18 @@ void app_request_stop()
 {
     AppState expected = AppState::Running;
     s_app_state.compare_exchange_strong(expected, AppState::StopRequested);
+}
+
+void app_request_key_back()
+{
+    if (s_app_state.load() != AppState::Running) return;
+    s_key_back_req.store(true);
+}
+
+void app_request_force_home()
+{
+    if (s_app_state.load() != AppState::Running) return;
+    s_force_home_req.store(true);
 }
 
 bool app_is_running()

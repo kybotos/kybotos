@@ -78,12 +78,22 @@ extern "C" void app_main()
         ESP_LOGE(TAG, "WASM runtime init failed");
     }
 
-    // power_key 短押し = ホームボタン(実行中アプリに停止要求 → メニュー復帰)。
+    // power_key 短押し = 戻るキー(Phase 18a)。実行中アプリの任意 export
+    // app_key() へ app_tick の切れ目で渡し、アプリが処理しなければ従来どおり
+    // 停止する(app_key を持たない既存アプリは即終了のまま)。
     // コールバックは power_key タスク(小スタック)上なので atomic 操作のみ。
     // 消灯中の短押しは「復帰」も兼ねる(要求フラグを立てるだけ。LVGL には触らない)
     pwr.set_on_short_press([](void*) {
         wasmrt::screensaver_request_wake();
-        wasmrt::app_request_stop();
+        wasmrt::app_request_key_back();
+    }, nullptr);
+
+    // power_key 1〜2 秒の長押し = 強制ホーム(Phase 18a)。アプリに聞かずに停止する。
+    // 戻るキーを無視する / 画面遷移が壊れて戻れないアプリからの脱出路。
+    // (電池運転では 2 秒で電源断が先に発火する)
+    pwr.set_on_force_home([](void*) {
+        wasmrt::screensaver_request_wake();
+        wasmrt::app_request_force_home();
     }, nullptr);
 
     // SD 準備+メニュー表示は FATFS 用に十分なスタックを持つタスクで行う

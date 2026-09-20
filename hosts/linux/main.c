@@ -133,6 +133,7 @@ typedef struct {
     wasm_exec_env_t exec_env;
     wasm_function_inst_t fn_tick;
     wasm_function_inst_t fn_exit;
+    wasm_function_inst_t fn_key;  /* Phase 18a: 任意 export app_key */
 } App;
 
 static uint8_t* read_file(const char* path, uint32_t* out_size)
@@ -194,6 +195,8 @@ static bool app_load(const char* path, App* a)
         wasm_function_inst_t fn_init = wasm_runtime_lookup_function(a->inst, "app_init");
         a->fn_tick = wasm_runtime_lookup_function(a->inst, "app_tick");
         a->fn_exit = wasm_runtime_lookup_function(a->inst, "app_exit");
+        /* Phase 18a: 任意 export。無ければキーはホストの既定動作(停止)になる */
+        a->fn_key = wasm_runtime_lookup_function(a->inst, "app_key");
         if (!fn_init || !a->fn_tick) {
             snprintf(s_status, sizeof(s_status), "app_init/app_tick not exported");
             goto fail;
@@ -316,6 +319,7 @@ int main(int argc, char** argv)
         bool app_running = false;
         int hover = -1;
         bool quit = false;
+        bool key_back_req = false; /* Phase 18a: 戻るキーの要求 */
 
         if (single_mode) {
             if (!app_load(single_path, &app)) {
@@ -323,10 +327,11 @@ int main(int argc, char** argv)
                 goto out;
             }
             app_running = true;
-            printf("single mode: close window or press ESC to quit\n");
+            printf("single mode: BACKSPACE = back key, ESC = force quit\n");
         } else {
             scan_apps(s_apps_dir);
-            printf("launcher: %s (click to launch, ESC to return)\n", s_apps_dir);
+            printf("launcher: %s (click to launch, BACKSPACE = back, ESC = force quit)\n",
+                   s_apps_dir);
         }
 
         while (!quit) {
@@ -337,7 +342,8 @@ int main(int argc, char** argv)
                 } else if (ev.type == SDL_KEYDOWN &&
                            ev.key.keysym.sym == SDLK_ESCAPE) {
                     if (app_running) {
-                        /* 実機の power_key 短押し相当 */
+                        /* 実機の強制ホーム(キー長押し)相当。アプリに聞かずに止める。
+                         * Phase 18a 以前と同じ挙動なので、回帰・キャプチャ手順は不変 */
                         app_unload(&app, true);
                         app_running = false;
                         if (single_mode) {
@@ -349,6 +355,11 @@ int main(int argc, char** argv)
                     } else {
                         quit = true; /* メニューで ESC = 終了 */
                     }
+                } else if (app_running && ev.type == SDL_KEYDOWN &&
+                           ev.key.keysym.sym == SDLK_BACKSPACE) {
+                    /* Phase 18a: 実機の power_key 短押し相当 = 戻るキー。
+                     * app_tick の切れ目で配送するためフラグにする */
+                    key_back_req = true;
                 } else if (app_running && (ev.type == SDL_MOUSEBUTTONDOWN ||
                                            ev.type == SDL_MOUSEBUTTONUP) &&
                            ev.button.button == SDL_BUTTON_LEFT) {
@@ -356,6 +367,14 @@ int main(int argc, char** argv)
                     int lx, ly;
                     host_sdl_window_to_logical(ev.button.x, ev.button.y, &lx, &ly);
                     host_sdl_push_touch(ev.type == SDL_MOUSEBUTTONDOWN, lx, ly);
+                } else if (app_running && ev.type == SDL_MOUSEMOTION) {
+                    /* Phase 18a: 押下中の移動 = 実機の LV_EVENT_PRESSING 相当。
+                     * 押下中かどうかの判断は hostapi_sdl 側(自分が配送した
+                     * DOWN/UP)で行う。SDL のボタンマスクを見ると、合成クリック
+                     * (xdotool --window)のときに立たず MOVE が出ない */
+                    int lx, ly;
+                    host_sdl_window_to_logical(ev.motion.x, ev.motion.y, &lx, &ly);
+                    host_sdl_push_touch_move(lx, ly);
                 } else if (!app_running && !single_mode &&
                            ev.type == SDL_MOUSEMOTION) {
                     int lx, ly;
@@ -390,6 +409,34 @@ int main(int argc, char** argv)
                         scan_apps(s_apps_dir);
                     }
                     continue;
+                }
+                /* Phase 18a: 戻るキーは app_tick の切れ目で配送する。
+                 * app_key が 0 を返す / export が無ければ既定動作 = 停止 */
+                if (key_back_req) {
+                    bool handled = false;
+                    key_back_req = false;
+                    if (app.fn_key) {
+                        uint32_t kargv[2] = {(uint32_t)HOSTAPI_KEY_BACK,
+                                             (uint32_t)HOSTAPI_KEY_ACTION_CLICK};
+                        if (wasm_runtime_call_wasm(app.exec_env, app.fn_key, 2, kargv)) {
+                            handled = (kargv[0] != 0);
+                        } else {
+                            fprintf(stderr, "app_key: %s\n",
+                                    wasm_runtime_get_exception(app.inst));
+                        }
+                    }
+                    printf("key back -> %s\n", handled ? "handled" : "stop");
+                    if (!handled) {
+                        app_unload(&app, true);
+                        app_running = false;
+                        if (single_mode) {
+                            quit = true;
+                        } else {
+                            scan_apps(s_apps_dir);
+                            snprintf(s_status, sizeof(s_status), "app stopped");
+                        }
+                        continue;
+                    }
                 }
                 host_sdl_render();
                 SDL_Delay(APP_TICK_MS);

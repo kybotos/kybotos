@@ -465,6 +465,26 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     - `device-regress.conf` の seq_smoke 保持時間を 60 秒に変更
   - **次**: Phase 18(Session 画面 + 単体再生)の指示書作成と、そのときの `docs/roadmap.md` 更新。
 
+- **Phase 18a(docs/prompts/phase18a.md、対話規約の確定と Sequencer への適用)完了(2026-09-20)。**
+  詳細は `docs/results/phase18a.md`、規約の原本は **`docs/design/ui-conventions.md`(新設)**、
+  決定記録は `docs/architecture.md` §11-11。
+  - **デバイス共通の対話規約を決めた**: **HW キー短押し = 1 階層戻る / 最上位でアプリ終了**、
+    タップ = 主アクション、**長押しは成立で点滅 → 離して実行**、**縦スワイプ = スクロール**、
+    HW キー 1〜2 秒 = 強制ホーム(脱出路)。**遷移やスクロールのためだけのボタンは置かない。**
+  - **Host API を非破壊に拡張**: `HOSTAPI_EV_TOUCH_MOVE`(8px 間引き + 末尾 MOVE の畳み込み)と、
+    任意 export **`app_key(key_id, action) -> i32`**(戻り値 0 = ホストの既定動作 = 停止)。
+    **既存 5 本の `.wasm` は未変更のまま従来どおり短押しで終了**(実機で metronome を確認)。
+    Linux ホストは **Backspace = 戻る / ESC = 強制終了**(回帰・キャプチャ手順は不変)。
+  - **`wasm-apps/appui/`(新設)**: ジェスチャ判定と画面スタック。no_std・依存 0・**テスト 16 件**。
+  - **sequencer を刷新**: `BACK` / `OPEN` / スクロールボタンを廃止し、**7 行 + 下段 3 セル**
+    (`1` / `RPT` / `PLAY`)。テンポはヘッダ右タップで入る **Tempo 画面**(縦スワイプ = 8px で 1bpm)。
+    描画スロットは **rect 12 / text 12**。**`.wasm` 15,255 B**(+436 B)。
+  - **検証**: Linux は xdotool + キャプチャで全操作(点滅は画素値で判定)、**S02 = 720 発ちょうど・停止後 0 発**。
+    実機はユーザー操作を録画(435 秒)し、T1〜T10 すべて合格(`app: key back -> handled/stop`、`app: forced home`)。
+    **回帰は実機 6 本・Linux 6 本とも PASS**(差分 +0、WARN/ERROR 0)。
+  - **申し送り**: **実機 WAMR プールの残りが 3,432 B / 48,960 B**。`.wasm` +436 B に対しプールは +2,312 B
+    増えた(限界費用は約 5 倍)ので、**Phase 19 では roadmap U-16(プールの拡大)を先に片付ける**。
+
 - **Phase 18(docs/prompts/phase18.md、Session 画面と単体再生 = Sequencer app の初回 `.wasm`)完了(2026-09-13)。**
   詳細は `docs/results/phase18.md`。
   - **`wasm-apps/sequencer/`**(`.wasm` 14,819 B)

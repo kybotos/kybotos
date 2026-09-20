@@ -111,8 +111,14 @@ void PowerKey::poll() noexcept {
     } else {
         if (press_start_ != 0) {
             const uint32_t held_ms = pdTICKS_TO_MS(now - press_start_);
-            if (held_ms <= cfg_.short_press_max_ms && on_short_press_) {
-                on_short_press_(short_press_arg_);
+            if (held_ms <= cfg_.short_press_max_ms) {
+                if (on_short_press_) on_short_press_(short_press_arg_);
+            } else if (held_ms >= cfg_.force_home_min_ms) {
+                // Phase 18a: forced home. The short press is the app's "back"
+                // key, so a stuck app needs an escape hatch that does not ask
+                // the app. In battery mode hold_ms (power off) fires first,
+                // while still pressed, so this only sees 1000..2000 ms there.
+                if (on_force_home_) on_force_home_(force_home_arg_);
             }
             press_start_ = 0;
         }

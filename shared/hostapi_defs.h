@@ -16,6 +16,7 @@
  * - エラーを返す関数は負数(通常 -1)。アプリの不正入力でトラップさせない。
  * - アプリのライフサイクル: app_init() → 100ms 周期の app_tick() 反復 →
  *   (任意 export の app_exit())→ ホストが破棄。すべて同一スレッド。
+ *   (Phase 18a)ハードウェアキーは任意 export の app_key() で受ける。下記 input。
  *   破棄時、ホストは再生中のオーディオを必ず停止する。
  *   アプリ起動時: 描画スロットは空、イベントキューは空、audio は STOPPED。
  *
@@ -37,6 +38,32 @@
  *     buf は hostapi_event_t の配列(buf_len はバイト数)。ホストは
  *     buf_len / 12 件を上限に書き、入り切らない分はキューに残して次回返す。
  *     アプリは tick 先頭で drain する想定。推奨バッファは 16 件分。
+ *
+ *   HOSTAPI_EV_TOUCH_MOVE (Phase 18a):
+ *     押下中に指(マウス)が動いたときの現在座標。スワイプ / スクロールに使う。
+ *     配送規則(両ホスト共通):
+ *       - DOWN を配送していない MOVE は捨てる(孤児 UP と同じ)。
+ *       - 前回配送した座標から HOSTAPI_TOUCH_MOVE_MIN_PX 以上動いたときだけ出す。
+ *       - **キューの末尾が MOVE なら、新しい MOVE で上書きする**(畳み込み)。
+ *         これで MOVE はキューに最大 1 件しか溜まらず、速いスワイプでも
+ *         DOWN / UP を押し出さない(キュー深さ 16、100ms tick)。
+ *       - したがってアプリは「MOVE は間引かれる。最新座標だけ使う」前提で書く。
+ *         UP には最終座標が入る。
+ *
+ * ============================== keys ==============================
+ *
+ *   int32_t app_key(int32_t key_id, int32_t action)   任意 export (Phase 18a)
+ *     ホストが押されたハードウェアキーを 1 つ渡す。呼ぶのは app_tick() から
+ *     戻った後、次の app_tick() の前(同一スレッド。再入はしない)。
+ *       key_id: HOSTAPI_KEY_*(v1 は BACK のみ)
+ *       action: HOSTAPI_KEY_ACTION_*(v1 は CLICK = 押して離した のみ)
+ *     戻り値 != 0: アプリが処理した(実行を続ける)。
+ *     戻り値 == 0: 処理しなかった → ホストが既定動作を行う。
+ *                  BACK の既定動作は「アプリを停止する」。
+ *     **export していないアプリには呼ばれず、ホストは常に既定動作を行う**
+ *     (= Phase 18a 以前と同じ「キー短押しでアプリ終了」)。
+ *     画面階層を持つアプリは「1 階層戻る → 0 を返さない」「最上位 → 0 を返す」
+ *     と書くことで、最上位で終了する挙動になる(docs/design/ui-conventions.md)。
  *
  *   イベント規約(ABI 凍結):
  *     - hostapi_event_t は 12 バイト固定・リトルエンディアン。サイズ変更は
@@ -179,7 +206,20 @@ enum {
     HOSTAPI_EV_NONE       = 0, /* 予約(無効値) */
     HOSTAPI_EV_TOUCH_DOWN = 1,
     HOSTAPI_EV_TOUCH_UP   = 2,
-    /* 将来: TOUCH_MOVE, KEY, ... 追加は非破壊 */
+    HOSTAPI_EV_TOUCH_MOVE = 3, /* Phase 18a。押下中の移動。param=0 */
+    /* 将来: KEY(時刻が要る入力), ... 追加は非破壊 */
+};
+
+/* MOVE を配送する最小移動量(論理 px)。両ホストで同じ値を使う */
+#define HOSTAPI_TOUCH_MOVE_MIN_PX 8
+
+/* 任意 export app_key() の引数(Phase 18a) */
+enum {
+    HOSTAPI_KEY_BACK = 1, /* 戻る(実機 = 電源キー短押し、Linux = Backspace) */
+};
+
+enum {
+    HOSTAPI_KEY_ACTION_CLICK = 0, /* 押して離した */
 };
 
 /* MIDI IN 受信レコード。16 bytes, align 8。フィールドはリトルエンディアン

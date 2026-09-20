@@ -333,7 +333,8 @@ HOSTAPI_SEQ_OP_STOP(seq_write の status に指定する。Phase 17)
 | `hostapi_tone_schedule` | **削除済み**(Phase 14) | 同上 |
 | `hostapi_tone_define` / `hostapi_tone_play` | **残す** | トーンパレットの定義・即時発音は L0 の CLICK port が使う。予約だけが seq に移る |
 | `hostapi_now_ms` | **残す** | UI 用の実時間。音楽時間軸とは別系統 |
-| gfx / input / audio / fs | **変更なし** | 本改訂の対象外 |
+| gfx / audio / fs | **変更なし** | 本改訂の対象外 |
+| input | **Phase 18a で 2 点追加**(いずれも非破壊): `HOSTAPI_EV_TOUCH_MOVE`(押下中の移動。8px 間引き + 末尾 MOVE の畳み込みでキューを溢れさせない)と、任意 export **`app_key(key_id, action) -> i32`**(ハードウェアキー。戻り値 0 = ホストの既定動作 = アプリ停止) | スワイプ操作と「HW キーで 1 階層戻る / 最上位でアプリ終了」のため。**`app_key` を export しないアプリの挙動は従来どおり**(キー短押しで即終了)なので、既存 `.wasm` は再ビルド不要。契約の原本は `shared/hostapi_defs.h`、操作規約は `docs/design/ui-conventions.md`、決定記録は `docs/architecture.md` §11-11 |
 
 **ABI の非破壊性**: 追加は新シンボルのみ。既存シンボルのシグネチャは変更しない。
 ただし**挙動が変わるものが 2 つある**ので、いずれも移行表のステップで
@@ -363,6 +364,9 @@ midi_loopback による確認を伴って行う:
 | `HOSTAPI_SEQ_OP_*` | status が MIDI ステータスバイトでない場合のオペコード |
 | `hostapi_seq_event_t` | シーケンサイベント。16 bytes(ABI 凍結) |
 | `hostapi_position_t` | transport 位置。32 bytes(ABI 凍結) |
+| `HOSTAPI_EV_*` | 入力イベント種別(`TOUCH_DOWN` / `TOUCH_UP` / **`TOUCH_MOVE`**。Phase 18a) |
+| `HOSTAPI_TOUCH_MOVE_MIN_PX` | MOVE を配送する最小移動量(論理 px、両ホスト共通。Phase 18a) |
+| `HOSTAPI_KEY_*` / `HOSTAPI_KEY_ACTION_*` | 任意 export `app_key()` の引数(Phase 18a) |
 
 サイズは `shared/seq_core.c` の `_Static_assert` で凍結してある。
 L0 の内部キュー要素は `hostapi_seq_event_t` そのもので、境界での変換はない(§6)。

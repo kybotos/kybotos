@@ -431,19 +431,30 @@ static hostapi_event_t s_evq[EVENT_QUEUE_DEPTH];
 static int s_evq_head = 0;
 static int s_evq_count = 0;
 static bool s_down_delivered = false;
+static bool s_pressed = false; /* 押下中か(MOVE を出すのはこの間だけ) */
+static int16_t s_last_x = 0; /* 最後に配送した座標(MOVE の間引きの基準) */
+static int16_t s_last_y = 0;
 
 void host_sdl_clear_events(void)
 {
     s_evq_head = 0;
     s_evq_count = 0;
     s_down_delivered = false;
+    s_pressed = false;
+    s_last_x = 0;
+    s_last_y = 0;
 }
 
 void host_sdl_push_touch(bool down, int x, int y)
 {
     /* アプリを起動したクリックの UP がアプリに漏れないように */
     if (!down && !s_down_delivered) return;
-    if (down) s_down_delivered = true;
+    if (down) {
+        s_down_delivered = true;
+        s_last_x = (int16_t)x;
+        s_last_y = (int16_t)y;
+    }
+    s_pressed = down;
 
     if (s_evq_count == EVENT_QUEUE_DEPTH) { /* 満杯: 最古を捨てる */
         s_evq_head = (s_evq_head + 1) % EVENT_QUEUE_DEPTH;
@@ -456,6 +467,50 @@ void host_sdl_push_touch(bool down, int x, int y)
     ev->x = (int16_t)x;
     ev->y = (int16_t)y;
     ev->time_ms = SDL_GetTicks() - s_start_ms;
+    s_evq_count++;
+}
+
+void host_sdl_push_touch_move(int x, int y)
+{
+    int dx, dy;
+    hostapi_event_t* tail;
+
+    /* 押下中だけ出す(実機の LV_EVENT_PRESSING と同じ意味にする)。
+     * SDL のボタンマスクではなく、自分が配送した DOWN/UP で判断するので、
+     * 合成イベント(xdotool の --window クリック)でも同じ経路を通る */
+    if (!s_down_delivered || !s_pressed) return;
+
+    dx = x - (int)s_last_x;
+    dy = y - (int)s_last_y;
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    if (dx < HOSTAPI_TOUCH_MOVE_MIN_PX && dy < HOSTAPI_TOUCH_MOVE_MIN_PX) return;
+
+    s_last_x = (int16_t)x;
+    s_last_y = (int16_t)y;
+
+    /* 末尾が MOVE なら上書きする(畳み込み。MOVE でキューを溢れさせない) */
+    if (s_evq_count > 0) {
+        tail = &s_evq[(s_evq_head + s_evq_count - 1) % EVENT_QUEUE_DEPTH];
+        if (tail->type == HOSTAPI_EV_TOUCH_MOVE) {
+            tail->x = (int16_t)x;
+            tail->y = (int16_t)y;
+            tail->time_ms = SDL_GetTicks() - s_start_ms;
+            return;
+        }
+    }
+
+    if (s_evq_count == EVENT_QUEUE_DEPTH) { /* 満杯: 最古を捨てる */
+        s_evq_head = (s_evq_head + 1) % EVENT_QUEUE_DEPTH;
+        s_evq_count--;
+        fprintf(stderr, "event queue full, dropped oldest\n");
+    }
+    tail = &s_evq[(s_evq_head + s_evq_count) % EVENT_QUEUE_DEPTH];
+    tail->type = HOSTAPI_EV_TOUCH_MOVE;
+    tail->param = 0;
+    tail->x = (int16_t)x;
+    tail->y = (int16_t)y;
+    tail->time_ms = SDL_GetTicks() - s_start_ms;
     s_evq_count++;
 }
 
