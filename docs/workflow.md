@@ -151,6 +151,14 @@ xdotool key --window <window id> Escape
 pgrep -af midibox_host                          # 残留なしを確認(何も出ない)
 ```
 
+- **ホストの出力をパイプ(`| tee` 等)に通さない。** stdout がブロックバッファされ、
+  `app started` が終了時までペインに出ず、`waitfor` が空振りする。ログをファイルにも残したい
+  ときは **stderr だけリダイレクト**する(`2> <file>`。`app started` / `app stopped` は stdout)。
+- **`waitfor` はスクロールバックにも一致する。** 同じペインで同じアプリを続けて起動すると
+  前回の `app started` を拾う。アプリ名を含めた文字列で待つか(`app started: ../../wasm-apps/<app>`)、
+  `pgrep -x midibox_host` で実際に起動したことを確かめる(§3.4 と同じ趣旨)。
+- 画面を撮って確認したいときは §3.6。
+
 ### 3.2 ESP32 実機
 
 **`docker run --rm`(都度起動)に統一する。** 持続コンテナ + `docker exec`
@@ -297,6 +305,49 @@ min/mean/max・ヒストグラム・外れ値・見かけ BPM の分布・0xFA/0
 - **テンポが動いている区間を固定の公称値で判定しないこと。** 外れ値の判定は
   公称間隔の 1.5 倍 / 0.5 倍なので、テンポ変更中の区間は「欠落」ではなく
   当然の変化として大量に引っかかる。`--segments auto` で区間に分けてから見る。
+
+### 3.6 Linux ホストの画面キャプチャ(Phase 18 で追加)
+
+**x11grab は使わない。** 画面全体(ルートウィンドウ)を読むため、この環境(Wayland + XWayland /
+GNOME)では常に黒くなる。**ウィンドウ ID を指定して読めば取れる**(静止画は ImageMagick の
+`import -window`、録画は `xwd -id` の連続取得)。対象ウィンドウは **`midibox_host` の pid と
+`xdotool getwindowpid` の一致**で選ぶ(同名のフレーム窓は mutter のもの)。この選択はスクリプトが行う。
+
+```bash
+# 静止画 1 枚 → captures/<タスク名>/<名前>.png
+./scripts/screen-still.sh captures/<タスク名> <名前>
+
+# 録画(常駐なので screen ペインへ send。Enter で停止 → mp4 にまとめて ffprobe で確認)
+./scripts/hpane.sh send screen "cd <repo> && ./scripts/screen-rec.sh captures/<タスク名>"
+./scripts/hpane.sh waitfor screen "Enterキーで停止" 15000
+#   … ここで操作(クリック送信など)…
+./scripts/hpane.sh send screen ""
+./scripts/hpane.sh waitfor screen "Duration" 30000
+```
+
+- 録画は `xwd -id` を既定 10fps(`SCREEN_FPS` で変更可)で連続取得し、停止後に ffmpeg でまとめる。
+  1 枚の取得は約 7ms。**フレーム間隔は sleep による概算なので UI の確認用**であり、
+  タイミング測定には使わない(実測: 50 枚を 5.27 秒で取得 → 5.00 秒の mp4、640×480)。
+- 黒画面でないことは数値で確かめられる: `convert <png> -format '%[fx:mean] %k' info:`
+  (x11grab のときは平均輝度 0.0002 / 68 色、ウィンドウ指定では 0.18 / 579 色だった)。
+
+**クリックで画面遷移を確認する場合**(Phase 18 で実施):
+§1-8 の「クリックは信頼できないので使わない」は不変条件として残してあるが、
+**キャプチャで届き先を毎回確かめながら**なら画面遷移の確認に使える(Phase 18 では全クリックが
+意図どおり届いた)。座標は **論理座標 ×2**(`hostapi_sdl.c` の `WINDOW_SCALE`)。
+
+```bash
+pid=$(pgrep -x midibox_host | head -1)
+for w in $(DISPLAY=:0 xdotool search --name "MidiAppBox WASM host"); do
+  [ "$(DISPLAY=:0 xdotool getwindowpid "$w")" = "$pid" ] && WIN=$w
+done
+DISPLAY=:0 xdotool mousemove --window "$WIN" <論理x*2> <論理y*2>; sleep 0.3
+DISPLAY=:0 xdotool click --window "$WIN" 1
+./scripts/screen-still.sh captures/<タスク名> <名前>   # 届いたかを撮って確かめる
+```
+
+- 撮影のタイミングを ms で待つときは `sleep "$(printf '%d.%03d' $((ms/1000)) $((ms%1000)))"`。
+  `sleep 0.$(printf %03d $ms)` は 1,000ms を超えると桁が崩れる(Phase 18 で撮り逃した)。
 
 ## §4 一巡チェックモード(routine)
 
