@@ -35,9 +35,10 @@ pub enum Action {
     LongPressFired { x: i32, y: i32 },
     /// 縦スワイプ中。`dy` は**押下位置からの累積移動量**(下が正)
     Scroll { dy: i32 },
-    /// 長押しが成立したあとのドラッグ(シャトル)。`dx` は**押下位置からの累積移動量**(右が正)。
-    /// 指を止めていても毎 tick 返るので、変位を「速さ」として扱える(Phase 18b)
-    Shuttle { dx: i32 },
+    /// 長押しが成立したあとのドラッグ。`dx` / `dy` は**押下位置からの累積移動量**
+    /// (右・下が正)。指を止めていても毎 tick 返るので、**変位を「速さ」としても
+    /// 「位置」としても**扱える(速さ = BPM / 位置 = 拍子。Phase 18b → 18d で 2 軸に)
+    Shuttle { dx: i32, dy: i32 },
     /// シャトルを離した(値の変更を確定する)
     ShuttleEnd,
     /// 長押し / タップが取り消された(スワイプに移行、または横方向へ動いた)
@@ -68,8 +69,9 @@ pub struct Gesture {
     t: u32,
     /// まだタップ / 長押しになりうるか(少しでも大きく動いたら false)
     tap_ok: bool,
-    /// シャトル中の累積移動量(右が正)。指が止まっていても tick で返すため保持する
+    /// シャトル中の累積移動量(右・下が正)。指が止まっていても tick で返すため保持する
     dx: i32,
+    dy: i32,
 }
 
 impl Default for Gesture {
@@ -85,7 +87,7 @@ fn elapsed(now: u32, since: u32) -> i32 {
 
 impl Gesture {
     pub const fn new() -> Gesture {
-        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true, dx: 0 }
+        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true, dx: 0, dy: 0 }
     }
 
     /// 長押しが成立していて、まだ離していないか(点滅させるかの判断に使う)
@@ -121,6 +123,7 @@ impl Gesture {
                 self.t = time_ms;
                 self.tap_ok = true;
                 self.dx = 0;
+                self.dy = 0;
                 Action::Press { x, y }
             }
             EV_TOUCH_MOVE => self.on_move(x, y),
@@ -137,14 +140,16 @@ impl Gesture {
             State::Scrolling => Action::Scroll { dy },
             State::Shuttling => {
                 self.dx = dx;
-                Action::Shuttle { dx }
+                self.dy = dy;
+                Action::Shuttle { dx, dy }
             }
             // 長押しが成立してから動かしたらシャトル(値の連続変更)に移る。
             // 小さな揺れでは移らないので、長押しのまま離す操作は壊れない
             State::Armed if dx.abs() > TAP_MAX_MOVE || dy.abs() > TAP_MAX_MOVE => {
                 self.state = State::Shuttling;
                 self.dx = dx;
-                Action::Shuttle { dx }
+                self.dy = dy;
+                Action::Shuttle { dx, dy }
             }
             State::Pressed | State::Armed => {
                 if dy.abs() >= SWIPE_MIN_MOVE && dy.abs() > dx.abs() {
@@ -192,7 +197,7 @@ impl Gesture {
     pub fn tick(&mut self, now_ms: u32) -> Action {
         if self.state == State::Shuttling {
             // 指が止まっていても変位を返し続ける(変位 = 速さ として使えるように)
-            return Action::Shuttle { dx: self.dx };
+            return Action::Shuttle { dx: self.dx, dy: self.dy };
         }
         if self.state == State::Pressed
             && self.tap_ok
@@ -255,7 +260,10 @@ mod tests {
         let mut g = Gesture::new();
         down(&mut g, 10, 100, 0);
         assert_eq!(g.tick(LONG_PRESS_MS), Action::LongPressArmed { x: 10, y: 100 });
-        assert_eq!(mv(&mut g, 10, 100 + SWIPE_MIN_MOVE, 700), Action::Shuttle { dx: 0 });
+        assert_eq!(
+            mv(&mut g, 10, 100 + SWIPE_MIN_MOVE, 700),
+            Action::Shuttle { dx: 0, dy: SWIPE_MIN_MOVE }
+        );
         assert!(!g.armed());
         assert!(g.shuttling());
         assert!(!g.scrolling());
@@ -322,16 +330,28 @@ mod tests {
         assert_eq!(mv(&mut g, 266, 13, 650), Action::None);
         assert!(g.armed());
         // 大きく動かすとシャトルへ
-        assert_eq!(mv(&mut g, 260 + 30, 15, 700), Action::Shuttle { dx: 30 });
+        assert_eq!(mv(&mut g, 260 + 30, 15, 700), Action::Shuttle { dx: 30, dy: 2 });
         assert!(g.shuttling());
         assert!(!g.armed());
         // 指を止めていても tick が変位を返し続ける(変位 = 速さ)
-        assert_eq!(g.tick(800), Action::Shuttle { dx: 30 });
-        assert_eq!(mv(&mut g, 260 - 50, 13, 900), Action::Shuttle { dx: -50 });
-        assert_eq!(g.tick(1000), Action::Shuttle { dx: -50 });
+        assert_eq!(g.tick(800), Action::Shuttle { dx: 30, dy: 2 });
+        assert_eq!(mv(&mut g, 260 - 50, 13, 900), Action::Shuttle { dx: -50, dy: 0 });
+        assert_eq!(g.tick(1000), Action::Shuttle { dx: -50, dy: 0 });
         assert_eq!(up(&mut g, 210, 13, 1100), Action::ShuttleEnd);
         assert!(!g.shuttling());
         assert_eq!(g.tick(1200), Action::None);
+    }
+
+    /// Phase 18d: 上下も使う(拍子の分母)。両軸が独立に届く
+    #[test]
+    fn a_shuttle_reports_both_axes() {
+        let mut g = Gesture::new();
+        down(&mut g, 150, 100, 0);
+        assert_eq!(g.tick(LONG_PRESS_MS), Action::LongPressArmed { x: 150, y: 100 });
+        assert_eq!(mv(&mut g, 150 + 32, 100 - 48, 700), Action::Shuttle { dx: 32, dy: -48 });
+        assert_eq!(g.tick(800), Action::Shuttle { dx: 32, dy: -48 });
+        assert_eq!(mv(&mut g, 150 + 32, 100 + 16, 900), Action::Shuttle { dx: 32, dy: 16 });
+        assert_eq!(up(&mut g, 182, 116, 1000), Action::ShuttleEnd);
     }
 
     #[test]
