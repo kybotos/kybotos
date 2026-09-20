@@ -555,3 +555,23 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **WAMR プール**: sequencer のロードに実機で 43.2KB / 48KB(**余裕 5.7KB**)、Linux(x86_64)で 58.8KB。
     **Linux だけプールを 96KB にした。** Phase 19 で実機のプールが足りなくなる見込み(申し送り)。
   - **回帰**: 6 本(sequencer を追加、`CLAUDE.md` も更新)。**U-2(同じアプリを 3 回反復して終了値が同一)を `device-regress.sh` に入れて PASS。**
+
+- **Phase 19(docs/prompts/phase19.md、Song / Chapter と arrangement 再生)を実装中(2026-09-21)。
+  実機が使えない回だったので、Linux までで止めてある。** 詳細は `docs/results/phase19.md`。
+  - **画面**: Menu の `Song` を有効化し、**Song 一覧 → arrangement → Chapter → Session 画面**を追加
+    (スタックの深さ 5。Session 画面は Session ルートと同じ画面で、パンくずだけが変わる)。
+    描画スロットは **rect 10 / text 12 のまま**(一覧 4 画面の行を共通化した)。
+  - **再生**: `play_song` を配線し、**Session 境界の PC をキューモード(+64)で 4 分音符 1 つ前に予約**。
+    Linux の実測で **PC は `ch16 program 0` → Start → `68` → `64` → Stop、クロックは 972 発ちょうど・停止後 0 発**。
+  - **`PC_LEAD_TICKS` の単位が違っていたのを直した**(24 → **960**)。Phase 16 は 24ppqn のつもりで定義したが、
+    利用者は内部 PPQN(960)の tick として使うため、**PC が境界の 12.5ms 前にしか届いていなかった**。
+  - **編集**: Song / arrangement の枠 / Chapter 内の Session 参照を `-` / `+` で増減。
+    **arrangement の `-` は孤立した Chapter 定義も消して `ChapterIdx` を詰める**、
+    **Chapter の `-` は参照だけ消す**(Session はグローバル)。**再生中の Song は編集不可**。
+  - **テンポ**: arrangement / Chapter 画面では `Song.default_bpm` を停止中だけシャトルで編集できる。
+  - **テスト**: seqcore **67 件** / appui **20 件** PASS。**Linux 回帰 6 本 ALL-PASS**。
+  - **⚠ WAMR プールがゲートに抵触する見込み**: `.wasm` 17,851 → **22,752 B**(一度 25,619 B まで増えたのを
+    3 つの手当てで圧縮)。**Linux のプール消費 86,776 B / 96KB** で、**実機は約 63.8KB / 65,344 = 残り約 1.5KB**
+    の見積もり(ゲートは 2KB)。**次セッションはまずフラッシュして実測する。**
+  - **未実施**: 実機のビルド / フラッシュ / プール実測 / 回帰、**SL MK3 との end-to-end とデモ動画**、
+    Q6(カウントイン)の判断。**1 回だけ最後の 1 小節が鳴らなかった事象(再現せず)も要監視。**

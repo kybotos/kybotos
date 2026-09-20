@@ -54,6 +54,14 @@ impl ScreenStack {
         self.items[self.len as usize - 1]
     }
 
+    /// 1 つ下(親)の画面。最上位なら None(Phase 19。パンくずを親で出し分けるのに使う)
+    pub fn below(&self) -> Option<u8> {
+        if self.len <= 1 {
+            return None;
+        }
+        Some(self.items[self.len as usize - 2])
+    }
+
     /// 今いる画面を差し替える(同じ階層での遷移)
     pub fn replace_top(&mut self, screen: u8) {
         self.items[self.len as usize - 1] = screen;
@@ -92,6 +100,18 @@ mod tests {
         assert_eq!(s.pop(), Pop::Popped(1));
         assert_eq!(s.pop(), Pop::Popped(0));
         assert_eq!(s.pop(), Pop::Exit);
+    }
+
+    #[test]
+    fn below_names_the_parent_screen() {
+        let mut s = ScreenStack::new(0);
+        assert_eq!(s.below(), None);
+        s.push(1);
+        assert_eq!(s.below(), Some(0));
+        s.push(2);
+        assert_eq!(s.below(), Some(1));
+        s.pop();
+        assert_eq!(s.below(), Some(0));
     }
 
     #[test]
