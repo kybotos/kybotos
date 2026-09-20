@@ -33,6 +33,7 @@ constexpr int kEventQueueDepth = 16;
 struct TextSlot {
     lv_obj_t* label = nullptr;
     int32_t x = 0, y = 0;
+    uint32_t rgb = 0xffffff; // Phase 18b: 直近に設定した文字色
 };
 struct RectSlot {
     lv_obj_t* rect = nullptr;
@@ -147,11 +148,10 @@ void screen_input_event_cb(lv_event_t* e)
 // ---- native implementations (wasm import "env") ----
 // 文字列引数はシグネチャ "*~" により WAMR が境界検証済みのネイティブポインタで渡す。
 
-void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
-                      const char* str, uint32_t len)
+// Phase 18b: draw_text / draw_text_rgb の共通実装。**同じ (x,y) は同じスロット**
+// (色だけ変える再描画も同じスロットを使い、スロットを二重に消費しない)。
+void draw_text_common(int32_t x, int32_t y, const char* str, uint32_t len, uint32_t rgb)
 {
-    (void)exec_env;
-
     char buf[kMaxTextLen + 1];
     if (len > kMaxTextLen) len = kMaxTextLen;
     memcpy(buf, str, len);
@@ -173,16 +173,37 @@ void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
         if (slot) {
             slot->label = lv_label_create(s_screen);
             slot->x = x; slot->y = y;
+            slot->rgb = 0xffffff;
             lv_obj_set_pos(slot->label, x, y);
             lv_obj_set_style_text_color(slot->label, lv_color_white(), 0);
         }
     }
     if (slot) {
+        if (slot->rgb != rgb) {
+            slot->rgb = rgb;
+            lv_obj_set_style_text_color(
+                slot->label,
+                lv_color_make((uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb), 0);
+        }
         lv_label_set_text(slot->label, buf);
     } else {
         ESP_LOGW(TAG, "draw_text: no free slot (max %d)", kMaxTextSlots);
     }
     lvgl_port_unlock();
+}
+
+void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
+                      const char* str, uint32_t len)
+{
+    (void)exec_env;
+    draw_text_common(x, y, str, len, 0xffffff);
+}
+
+void native_hostapi_draw_text_rgb(wasm_exec_env_t exec_env, int32_t x, int32_t y,
+                      const char* str, uint32_t len, uint32_t rgb888)
+{
+    (void)exec_env;
+    draw_text_common(x, y, str, len, rgb888 & 0xffffff);
 }
 
 void native_hostapi_fill_rect(wasm_exec_env_t exec_env, int32_t x, int32_t y,

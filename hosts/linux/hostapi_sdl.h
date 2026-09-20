@@ -45,6 +45,8 @@ void host_click_play_slot(uint32_t slot);
 /* shared/hostapi_defs.h の X-macro が参照する native_* 実装 */
 void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
                               const char* str, uint32_t len);
+void native_hostapi_draw_text_rgb(wasm_exec_env_t exec_env, int32_t x, int32_t y,
+                                  const char* str, uint32_t len, uint32_t rgb888);
 void native_hostapi_fill_rect(wasm_exec_env_t exec_env, int32_t x, int32_t y,
                               int32_t w, int32_t h, uint32_t rgb888);
 void native_hostapi_play_click(wasm_exec_env_t exec_env);

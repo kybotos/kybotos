@@ -44,6 +44,7 @@
 typedef struct {
     bool used;
     int32_t x, y;
+    uint32_t rgb888; /* Phase 18b: 文字色 */
     char text[MAX_TEXT_LEN + 1];
 } TextSlot;
 
@@ -610,9 +611,48 @@ static void draw_char8x8(int32_t x, int32_t y, unsigned char c)
     }
 }
 
-/* テキスト描画の共通経路。TTF があればアンチエイリアス描画、無ければ font8x8 */
+/* Phase 18b: 実機のフォント(LVGL Montserrat + FontAwesome サブセット)にある
+ * U+F04B(▶)/ U+F04D(■)は DejaVu に無い。アプリが両ホストで同じバイト列を書けるよう、
+ * この 2 つだけホスト側が図形として描く。戻り値は進めた幅(px)、0 = 記号ではない */
+#define SYM_W 12
+static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
+{
+    int i;
+    SDL_Rect r;
+    if (p[0] != 0xEF || p[1] != 0x81) return 0;
+    SDL_SetRenderDrawColor(s_renderer, (rgb888 >> 16) & 0xff, (rgb888 >> 8) & 0xff,
+                           rgb888 & 0xff, 255);
+    if (p[2] == 0x8B) { /* U+F04B ▶(右向き三角): 左端が最も高く、右端で 1px になる */
+        for (i = 0; i < 10; ++i) {
+            int h = 11 - i;
+            r.x = x + 1 + i;
+            r.y = y + 6 - h / 2;
+            r.w = 1;
+            r.h = h;
+            SDL_RenderFillRect(s_renderer, &r);
+        }
+        return SYM_W;
+    }
+    if (p[2] == 0x8D) { /* U+F04D ■ */
+        r.x = x + 1; r.y = y + 1; r.w = 10; r.h = 10;
+        SDL_RenderFillRect(s_renderer, &r);
+        return SYM_W;
+    }
+    return 0;
+}
+
+/* テキスト描画の共通経路。TTF があればアンチエイリアス描画、無ければ font8x8。
+ * 記号(上記)は図形で描き、残りを通常のテキストとして描く */
 static void draw_string(int x, int y, const char* s, uint32_t rgb888)
 {
+    {
+        const unsigned char* p = (const unsigned char*)s;
+        int adv = draw_symbol(x, y, p, rgb888);
+        if (adv > 0) {
+            if (p[3] != '\0') draw_string(x + adv, y, (const char*)(p + 3), rgb888);
+            return;
+        }
+    }
 #ifdef HAVE_SDL_TTF
     if (s_font && s[0]) {
         SDL_Color color = { (Uint8)(rgb888 >> 16), (Uint8)(rgb888 >> 8),
@@ -717,7 +757,7 @@ void host_sdl_render(void)
     for (int i = 0; i < MAX_TEXT_SLOTS; ++i) {
         if (!s_texts[i].used) continue;
         const TextSlot* t = &s_texts[i];
-        draw_string(t->x, t->y, t->text, 0xffffff);
+        draw_string(t->x, t->y, t->text, t->rgb888);
     }
 
     SDL_RenderPresent(s_renderer);
@@ -725,10 +765,11 @@ void host_sdl_render(void)
 
 /* ---- natives (wasm import "env") ---- */
 
-void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
-                              const char* str, uint32_t len)
+/* Phase 18b: draw_text / draw_text_rgb の共通実装。**同じ (x,y) は同じスロット**
+ * (色だけ変える再描画も同じスロットを使い、スロットを二重に消費しない) */
+static void draw_text_common(int32_t x, int32_t y, const char* str, uint32_t len,
+                             uint32_t rgb888)
 {
-    (void)exec_env;
     TextSlot* slot = NULL;
     for (int i = 0; i < MAX_TEXT_SLOTS; ++i) {
         if (s_texts[i].used && s_texts[i].x == x && s_texts[i].y == y) {
@@ -750,7 +791,22 @@ void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
     slot->text[len] = '\0';
     slot->x = x;
     slot->y = y;
+    slot->rgb888 = rgb888 & 0xffffff;
     slot->used = true;
+}
+
+void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
+                              const char* str, uint32_t len)
+{
+    (void)exec_env;
+    draw_text_common(x, y, str, len, 0xffffff);
+}
+
+void native_hostapi_draw_text_rgb(wasm_exec_env_t exec_env, int32_t x, int32_t y,
+                                  const char* str, uint32_t len, uint32_t rgb888)
+{
+    (void)exec_env;
+    draw_text_common(x, y, str, len, rgb888);
 }
 
 void native_hostapi_fill_rect(wasm_exec_env_t exec_env, int32_t x, int32_t y,

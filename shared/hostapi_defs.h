@@ -27,7 +27,16 @@
  * スロットは text / rect 各 16。あふれは警告ログの上で無視される。
  *
  *   hostapi_draw_text(x, y, str_ptr, str_len)
- *     UTF-8 文字列を (x,y) に描画。色は白固定(v1)。
+ *     UTF-8 文字列を (x,y) に描画。色は白(hostapi_draw_text_rgb の 0xffffff と同じ)。
+ *   hostapi_draw_text_rgb(x, y, str_ptr, str_len, rgb888)   (Phase 18b)
+ *     色を指定して描画する。**同じ (x,y) なら hostapi_draw_text と同じスロット**を
+ *     更新する(色だけを変える再描画も同じスロット)。スロットを二重に消費しない。
+ *     文字と色の両方がキャッシュと同じなら、ホストは再描画を省いてよい。
+ *
+ *   **記号(Phase 18b)**: 再生 / 停止のような記号は、実機のフォント
+ *   (LVGL Montserrat + FontAwesome サブセット)にある **U+F04B(▶)/ U+F04D(■)**
+ *   を使う。Linux ホストのフォント(DejaVu)はこの私用領域を持たないので、
+ *   **ホスト側がこの 2 つだけ三角形・四角形として描く**(アプリは同じバイト列を書けばよい)。
  *   hostapi_fill_rect(x, y, w, h, rgb888)
  *     矩形塗り。色は 0xRRGGBB。
  *
@@ -346,6 +355,7 @@ enum {
 #define HOSTAPI_NATIVE_SYMBOLS(X)         \
     /* gfx */                             \
     X(hostapi_draw_text, "(ii*~)")        \
+    X(hostapi_draw_text_rgb, "(ii*~i)")   \
     X(hostapi_fill_rect, "(iiiii)")       \
     /* input */                           \
     X(hostapi_poll_event, "(*~)i")        \

@@ -35,6 +35,11 @@ pub enum Action {
     LongPressFired { x: i32, y: i32 },
     /// 縦スワイプ中。`dy` は**押下位置からの累積移動量**(下が正)
     Scroll { dy: i32 },
+    /// 長押しが成立したあとのドラッグ(シャトル)。`dx` は**押下位置からの累積移動量**(右が正)。
+    /// 指を止めていても毎 tick 返るので、変位を「速さ」として扱える(Phase 18b)
+    Shuttle { dx: i32 },
+    /// シャトルを離した(値の変更を確定する)
+    ShuttleEnd,
     /// 長押し / タップが取り消された(スワイプに移行、または横方向へ動いた)
     Cancel,
 }
@@ -48,6 +53,8 @@ enum State {
     Armed,
     /// 縦スワイプ中
     Scrolling,
+    /// 長押しの後のドラッグ中(シャトル)
+    Shuttling,
     /// この押下ではもう何も起こさない(横スワイプ)
     Dead,
 }
@@ -61,6 +68,8 @@ pub struct Gesture {
     t: u32,
     /// まだタップ / 長押しになりうるか(少しでも大きく動いたら false)
     tap_ok: bool,
+    /// シャトル中の累積移動量(右が正)。指が止まっていても tick で返すため保持する
+    dx: i32,
 }
 
 impl Default for Gesture {
@@ -76,7 +85,7 @@ fn elapsed(now: u32, since: u32) -> i32 {
 
 impl Gesture {
     pub const fn new() -> Gesture {
-        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true }
+        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true, dx: 0 }
     }
 
     /// 長押しが成立していて、まだ離していないか(点滅させるかの判断に使う)
@@ -97,6 +106,11 @@ impl Gesture {
         matches!(self.state, State::Scrolling)
     }
 
+    /// シャトル中か(長押しの点滅を続けるかの判断に使う)
+    pub fn shuttling(&self) -> bool {
+        matches!(self.state, State::Shuttling)
+    }
+
     /// 入力イベントを 1 件食わせる
     pub fn on_event(&mut self, ev_type: u16, x: i32, y: i32, time_ms: u32) -> Action {
         match ev_type {
@@ -106,6 +120,7 @@ impl Gesture {
                 self.y = y;
                 self.t = time_ms;
                 self.tap_ok = true;
+                self.dx = 0;
                 Action::Press { x, y }
             }
             EV_TOUCH_MOVE => self.on_move(x, y),
@@ -120,6 +135,17 @@ impl Gesture {
         match self.state {
             State::Idle | State::Dead => Action::None,
             State::Scrolling => Action::Scroll { dy },
+            State::Shuttling => {
+                self.dx = dx;
+                Action::Shuttle { dx }
+            }
+            // 長押しが成立してから動かしたらシャトル(値の連続変更)に移る。
+            // 小さな揺れでは移らないので、長押しのまま離す操作は壊れない
+            State::Armed if dx.abs() > TAP_MAX_MOVE || dy.abs() > TAP_MAX_MOVE => {
+                self.state = State::Shuttling;
+                self.dx = dx;
+                Action::Shuttle { dx }
+            }
             State::Pressed | State::Armed => {
                 if dy.abs() >= SWIPE_MIN_MOVE && dy.abs() > dx.abs() {
                     // 縦スワイプへ移行(長押しが成立していたら取り消される)
@@ -156,13 +182,18 @@ impl Gesture {
         self.state = State::Idle;
         match state {
             State::Armed => Action::LongPressFired { x, y },
+            State::Shuttling => Action::ShuttleEnd,
             State::Pressed if self.tap_ok => Action::Tap { x, y },
             _ => Action::None,
         }
     }
 
-    /// 毎 `app_tick` に呼ぶ。長押しの成立はここで検出する
+    /// 毎 `app_tick` に呼ぶ。長押しの成立と、シャトルの継続はここで返す
     pub fn tick(&mut self, now_ms: u32) -> Action {
+        if self.state == State::Shuttling {
+            // 指が止まっていても変位を返し続ける(変位 = 速さ として使えるように)
+            return Action::Shuttle { dx: self.dx };
+        }
         if self.state == State::Pressed
             && self.tap_ok
             && elapsed(now_ms, self.t) >= LONG_PRESS_MS as i32
@@ -217,16 +248,18 @@ mod tests {
         assert!(!g.armed());
     }
 
+    /// Phase 18b で意味が変わった: 長押しが成立した後のドラッグは**スクロールではなくシャトル**。
+    /// (成立した時点でジェスチャはその要素のものになる。18a では取り消してスクロールにしていた)
     #[test]
-    fn long_press_is_cancelled_by_swipe() {
+    fn drag_after_long_press_is_a_shuttle_not_a_scroll() {
         let mut g = Gesture::new();
         down(&mut g, 10, 100, 0);
         assert_eq!(g.tick(LONG_PRESS_MS), Action::LongPressArmed { x: 10, y: 100 });
-        // 成立後に縦へ動かすとスクロールへ移行し、離しても実行されない
-        assert_eq!(mv(&mut g, 10, 100 + SWIPE_MIN_MOVE, 700), Action::Scroll { dy: SWIPE_MIN_MOVE });
+        assert_eq!(mv(&mut g, 10, 100 + SWIPE_MIN_MOVE, 700), Action::Shuttle { dx: 0 });
         assert!(!g.armed());
-        assert!(g.scrolling());
-        assert_eq!(up(&mut g, 10, 124, 800), Action::None);
+        assert!(g.shuttling());
+        assert!(!g.scrolling());
+        assert_eq!(up(&mut g, 10, 124, 800), Action::ShuttleEnd);
     }
 
     #[test]
@@ -278,6 +311,36 @@ mod tests {
         // 縦のほうが大きいので縦スクロール
         assert_eq!(mv(&mut g, 110, 240, 50), Action::Scroll { dy: 40 });
         assert!(g.scrolling());
+    }
+
+    #[test]
+    fn long_press_then_drag_becomes_a_shuttle() {
+        let mut g = Gesture::new();
+        down(&mut g, 260, 13, 0);
+        assert_eq!(g.tick(LONG_PRESS_MS), Action::LongPressArmed { x: 260, y: 13 });
+        // 小さな揺れではシャトルに移らない(長押しのまま)
+        assert_eq!(mv(&mut g, 266, 13, 650), Action::None);
+        assert!(g.armed());
+        // 大きく動かすとシャトルへ
+        assert_eq!(mv(&mut g, 260 + 30, 15, 700), Action::Shuttle { dx: 30 });
+        assert!(g.shuttling());
+        assert!(!g.armed());
+        // 指を止めていても tick が変位を返し続ける(変位 = 速さ)
+        assert_eq!(g.tick(800), Action::Shuttle { dx: 30 });
+        assert_eq!(mv(&mut g, 260 - 50, 13, 900), Action::Shuttle { dx: -50 });
+        assert_eq!(g.tick(1000), Action::Shuttle { dx: -50 });
+        assert_eq!(up(&mut g, 210, 13, 1100), Action::ShuttleEnd);
+        assert!(!g.shuttling());
+        assert_eq!(g.tick(1200), Action::None);
+    }
+
+    #[test]
+    fn a_swipe_without_long_press_is_not_a_shuttle() {
+        let mut g = Gesture::new();
+        down(&mut g, 150, 100, 0);
+        assert_eq!(mv(&mut g, 150 + 40, 100, 100), Action::Cancel); // 横スワイプは無視のまま
+        assert_eq!(g.tick(LONG_PRESS_MS), Action::None);
+        assert_eq!(up(&mut g, 190, 100, 700), Action::None);
     }
 
     #[test]
