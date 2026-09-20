@@ -31,7 +31,16 @@ static const char* TAG = "WASM";
 // PSRAM へ移った**ことで成立しなくなった(docs/lessons.md「PSRAM 本番反映」、
 // `os_mmap` は MALLOC_CAP_SPIRAM を使う)。UI が育った sequencer は 48KB では
 // `create_exec_env failed` になり、ロードできなくなっていた。
-static uint8_t s_wamr_heap[64 * 1024];
+//
+// **Phase 19 で 80KB にした(ユーザー承認済み)。** Song / Chapter を足した sequencer
+// (`.wasm` 22,752 B)は instantiate だけで **highmark 55,200 / 残り 10,144 B** を使い、
+// 続く `create_exec_env`(8KB スタック)が取れずに再び `create_exec_env failed` になった。
+// プールの消費は `.wasm` の増分の約 3 倍で増える(Phase 18a/18b/19 の実測)ので、
+// **残りが 2KB を切ったら次のフェーズが入らない**と考えて 16KB 足した。
+// 代償は internal の静的 +16KB で、**回帰のしきい値(`scripts/device-regress.conf` の
+// `MIN_FREE_INT` / `MIN_LARGEST_INT`)を新しい基準値に合わせて下げてある**。
+// 判断の記録は docs/architecture.md §9 と docs/results/phase19.md。
+static uint8_t s_wamr_heap[80 * 1024];
 
 namespace wasmrt {
 

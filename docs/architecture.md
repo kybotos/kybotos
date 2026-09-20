@@ -312,7 +312,7 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
 | PSRAM | **使う(Phase 15 で本番反映)** | 8MB octal / OCT / 80MHz / `SPIRAM_USE_CAPS_ALLOC`。**WASM の linear memory は PSRAM から確保される**(下表)。SDMMC プローブは飛ばして SDSPI 固定(§11-2) |
 | キュー操作のコスト見積 | 定常 ~360ns/op、**負荷時 ~1.4µs/op** | P10-4 の 16B ランダムアクセス実測(mp3 再生中に 3.8 倍へ跳ねる回を観測)。ISR/タイマコールバック内の操作はこの最悪値を見込む |
 
-### WAMR プールの大きさ(Phase 18c で 64KB に戻した)
+### WAMR プールの大きさ(Phase 18c で 64KB → **Phase 19 で 80KB**)
 
 - Phase 7B-fix で **64KB → 48KB** に縮めた理由は「system heap の最大連続ブロックが細り、
   **WASM の linear memory(約 20KB 連続)が確保できなくなる**」ことだった。
@@ -325,6 +325,18 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
   **largest_int 57,344 → 40,960**。回帰のしきい値(`MIN_FREE_INT=80000` /
   `MIN_LARGEST_INT=32768`)は満たすが、**余裕は 9.4KB / 8.2KB に縮んだ**。
   次に internal を大きく使う変更をするときは、この 2 つを先に見ること。
+
+- **Phase 19 で 80KB にした(ユーザー承認済み)。** Song / Chapter を足した sequencer
+  (`.wasm` 22,752 B)は **instantiate だけで highmark 55,200 / 残り 10,144 B** を使い、
+  続く `create_exec_env`(8KB スタック)が取れずに **再び `create_exec_env failed`** になった。
+- 実測(実機、プール 81,728 B): **instantiate 後 55,200 → exec_env 後 63,464、余裕 18,264 B**。
+  linear memory 26,640 B は PSRAM、`.wasm` バッファ 22,752 B は internal(roadmap U-6 は未着手)。
+- 代償は internal の静的 +16KB で、**free_int 89,368 → 73,052**、**largest_int 40,960 → 31,744**。
+  **回帰のしきい値を `MIN_FREE_INT=65000` / `MIN_LARGEST_INT=24576` に下げた**
+  (`scripts/device-regress.conf`。基準値から 8KB 下)。
+- **プール消費は `.wasm` の増分の約 3 倍で増える**(18a 以降の実測)。
+  Phase 20 以降でさらに増えるなら、**U-6(`.wasm` バッファを PSRAM へ)で internal を取り戻してから**
+  プールを足すのが順序として自然である(U-6 はプール消費そのものは減らさない)。
 
 ### PSRAM に置くもの / 置かないもの(Phase 15)
 
