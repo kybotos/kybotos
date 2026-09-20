@@ -158,6 +158,20 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
   前回の `app started` を拾う。アプリ名を含めた文字列で待つか(`app started: ../../wasm-apps/<app>`)、
   `pgrep -x midibox_host` で実際に起動したことを確かめる(§3.4 と同じ趣旨)。
 - 画面を撮って確認したいときは §3.6。
+- **ホスト非依存のコードは Linux でテストしてから実機へ行く**(実機・Linux の両方で同じ結果になる部分を、
+  安い側で先に潰す)。
+  ```bash
+  # shared/seq_core.c の単体テスト(偽の時計でディスパッチを決定的に進める。Phase 17 で新設)
+  ./scripts/hpane.sh run unix-build \
+    "cd <repo>/hosts/linux && cmake --build build -j && ctest --test-dir build --output-on-failure" 600000
+  # Rust の crate(wasm-apps/seqcore 等): ホストでのテストと、no_std で通ることの確認
+  ./scripts/hpane.sh run unix-build \
+    "cd <repo>/wasm-apps/seqcore && cargo test --features std && \
+     cargo build --release --target wasm32-unknown-unknown" 600000
+  ```
+  **境界の数µs で決まる挙動(「その tick のクロックを出さない」等)は実時間の試験では確かめられない。**
+  偽の時計の単体テストに寄せ、実機・Linux では「同じ `.wasm` が同じ判定を出すか」を見る(Phase 17)。
+  アプリの `.wasm` のビルドとコミットの手順は `wasm-apps/README.md`。
 
 ### 3.2 ESP32 実機
 
@@ -166,6 +180,16 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
 (root 実行)と混在すると `build.ninja`/`.ninja_log` 等の所有者が割れて
 `Permission denied` を起こす実績があるため使わない(詳細は docs/results/phase08a.md)。
 ビルド・フラッシュ・モニタすべてこの方式で統一する。
+
+**一時的な計測コード(プール消費・実行時間などを一度だけ見たいとき)**:
+
+- 目印のコメント(`PHASE18-TEMP` のようにフェーズ番号入り)を付けて入れる。
+- 計測が済んだら **`git checkout -- <file>` で戻し、`git diff` が 0 行であることを確認**してから
+  次のビルドに進む。**Edit で 1 行だけ消すと前後の行が連結されることがある**
+  (Phase 18 で `src/CMakeLists.txt` の 2 行がつながり、ビルドに使う前に `git diff` で気づいた)。
+- `idf_build_set_property(COMPILE_DEFINITIONS …)` でビルド時定義を足す / 外すと**全再ビルド**に
+  なる(約 2,000 ターゲット、数分)。計測のために 2 回ビルドすることを見込んで段取りする。
+- 実機の自己検査(`SEQCORE_SELFTEST`)もこの形で有効化する(`shared/seq_core.h` の説明)。
 
 `managed_components/`(gitignore 対象)を「再取得可能なキャッシュ」と即断して
 中身を確認せず `rm -rf` してはならない。ハッシュ不一致で `idf.py fullclean` が
@@ -252,8 +276,21 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
 # → captures/<タスク名>/monitor.log と report.md。exit 0 が合格
 ```
 
-- 対象アプリ・保持秒数・許容警告パターン・アプリごとの許容 heap 差分・期待する
-  largest block は `scripts/device-regress.conf` に外出ししてある。
+- 対象アプリ・保持秒数・許容警告パターン・アプリごとの許容 heap 差分・下限しきい値
+  (`MIN_FREE_INT` / `MIN_LARGEST_INT` / `MIN_FREE_PSRAM`。Phase 15 で「固定値一致」から改訂)・
+  **反復回数**(`REPEAT_RUNS` / `REPEAT_OVERRIDE`)は `scripts/device-regress.conf` に外出ししてある。
+- **同じアプリを N 回繰り返す**(Phase 18 で追加、既定 3 回。seq_smoke は 1 回)。
+  1 回ごとの差分 +0 に加えて、**N 回の終了時の `free_int` / `free_psram` がすべて同じ**ことを
+  判定する(1 回ごとの差分が 0 でも、開始値が回を追って下がる漏れを捕まえるため)。
+  表には「<アプリ> 反復 N 回」の行が出る。
+- **保持中にアプリが自分で止まると「停止しない」と判定される。** スクリプトは
+  「自分が送った `stop` の後の停止行」を待つので、それより前に止まっていると空振りする
+  (このとき `stop` の応答は `stop idle`)。**電源キーの短押しはログを出さずにアプリを止める**ので、
+  1 回の FAIL で結論を出さず、`monitor.log` の時系列(`MBCMD: stop ok` の有無)を見てから再実行する
+  (Phase 18 で実際に 1 回だけ出て、再実行では再現しなかった)。
+- **実機の回帰と Linux ホストの回帰を同時に走らせない。** 実機が UM-ONE へ流した MIDI を
+  Linux ホストが受け、ドレインしないアプリ(touch_demo 等)で `midi: RX ring buffer full` が
+  大量に出る(Phase 17。構成依存の挙動で、単独で走らせれば出ない)。
 - スクリプトは実行前に `docker ps` を見て、シリアルポートを掴んだままの
   `idf.py monitor` コンテナがあれば落とす(既知の教訓)。終了時も同様に片付ける
   (`--keep-monitor` で残せる)。
@@ -298,6 +335,15 @@ min/mean/max・ヒストグラム・外れ値・見かけ BPM の分布・0xFA/0
   ツール自身の遅延の自己検証になる(mean 数十µs が正常)。
 - **STOPPED をまたぐ間隔は統計から除外される**(0xFA/0xFB〜0xFC の再生区間ごとに
   集計する)。stop→continue の空白を外れ値と数えないため。
+- **出力には「再生区間ごとの 0xF8 数」と「停止中(区間外)の 0xF8 数」がある**(Phase 17 で追加)。
+  「Start から Stop までちょうど N 発」「Stop の後は 0 発」を見るための行で、
+  境界停止(`HOSTAPI_SEQ_OP_STOP`)や曲の長さの検証はこの 2 行で判定する。
+  それ以前の集計は区間外のクロックを黙って捨てていたので、古い `.md` と比べるときは注意。
+- **記録器は測定対象を起動する前につないでおく。** `app_init` で即 `transport_start` する
+  アプリ(seq_smoke 等)は最初の 0xFA を取り逃がしうる(`--wait` を付けても、ポートが現れてから
+  接続するまでの隙間で漏れる)。区間の数え方で吸収されるが、**0xFA の件数だけは実際より 1 少なく出る**。
+- **CC など データバイトまで見たいときは `aseqdump` を併走させる。** probe の CSV はイベントの種別しか
+  持たない(`aseqdump -p <ポート名>`。seq_smoke の判定値 CC#119/#120 はこれで読む)。
 - **受信側の σ で送信精度を判定しないこと。** UM-ONE 経由は USB の 1ms フレームを
   通るのでぼやける。送信側の σ は検証ビルドの送信打刻(`--txlog`)で見る。
   なお **MIDI DIN は 1 バイト 320µs** なので、それより短い受信間隔が出たら
