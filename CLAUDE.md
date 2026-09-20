@@ -51,3 +51,8 @@ ESP32-S3-Touch-LCD-2.8 (Waveshare) ベースの音楽デバイスファームウ
   足してこの 6 本になった(docs/results/phase18.md)。
   (旧「MP3 デモモードで分岐」ルールは Phase 6D で解消済み。履歴は
   docs/results/phase00.md・phase06.md。)
+- **フェーズが終わったら、そのフェーズで得た内容を必要に応じて docs/workflow.md と
+  docs/lessons.md に反映する。** 手順・環境・不変条件に関わるもの(どのアプリの開発でも使う
+  ビルド / 回帰 / 測定 / キャプチャのやり方)は workflow.md、技術的な教訓は lessons.md。
+  アプリに依存する内容は workflow.md に書かず、そのアプリの仕様書か docs/results/ に残す。
+  反映の要否はフェーズの締めで必ず確認する(反映不要と判断した場合もそれでよい)。
