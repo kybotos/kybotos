@@ -312,6 +312,20 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
 | PSRAM | **使う(Phase 15 で本番反映)** | 8MB octal / OCT / 80MHz / `SPIRAM_USE_CAPS_ALLOC`。**WASM の linear memory は PSRAM から確保される**(下表)。SDMMC プローブは飛ばして SDSPI 固定(§11-2) |
 | キュー操作のコスト見積 | 定常 ~360ns/op、**負荷時 ~1.4µs/op** | P10-4 の 16B ランダムアクセス実測(mp3 再生中に 3.8 倍へ跳ねる回を観測)。ISR/タイマコールバック内の操作はこの最悪値を見込む |
 
+### WAMR プールの大きさ(Phase 18c で 64KB に戻した)
+
+- Phase 7B-fix で **64KB → 48KB** に縮めた理由は「system heap の最大連続ブロックが細り、
+  **WASM の linear memory(約 20KB 連続)が確保できなくなる**」ことだった。
+- **Phase 15 で linear memory は PSRAM から確保されるようになった**(`os_mmap` が
+  `MALLOC_CAP_SPIRAM` を使う)ので、この理由は成立しない。
+- Phase 18c で sequencer(`.wasm` 17.5KB)が **48KB のプールに入らず `create_exec_env failed`**
+  になったため、**64KB に戻した**(ユーザー承認済み。roadmap U-16)。
+- 実測(実機): プール消費 48,704 B / 65,344 B(**余裕 16,640 B**)。
+  代償は internal の静的消費 +16KB で、**free_int 105,832 → 89,368**、
+  **largest_int 57,344 → 40,960**。回帰のしきい値(`MIN_FREE_INT=80000` /
+  `MIN_LARGEST_INT=32768`)は満たすが、**余裕は 9.4KB / 8.2KB に縮んだ**。
+  次に internal を大きく使う変更をするときは、この 2 つを先に見ること。
+
 ### PSRAM に置くもの / 置かないもの(Phase 15)
 
 `CONFIG_SPIRAM=y` にしても、**この表の「internal 固定」の行は 1 つも動かない**
@@ -323,7 +337,7 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
 | LVGL 描画バッファ(19,200 B ×2) | **PSRAM** | `esp_lvgl_port` の `MALLOC_CAP_DEFAULT` | Phase 15 L-a。`psram_dma_direct=1` とセット(下記) |
 | L0 キュー(4,096 B) | **internal 固定** | `shared/seq_core.c` の静的 BSS | 6B / 7B-fix / 9c |
 | テンポマップ・拍子マップ・L1 の状態 | **internal 固定** | 同上 | 同上 |
-| WAMR プール(49,152 B) | **internal 固定** | `wasm_runtime.cpp` の静的 BSS | 7B-fix |
+| WAMR プール(**65,536 B**。Phase 18c で 49,152 B から戻した) | **internal 固定** | `wasm_runtime.cpp` の静的 BSS | 7B-fix → **18c** |
 | `.wasm` バッファ | **internal**(現状) | `malloc()`(`CAPS_ALLOC` では internal) | Phase 15。**いずれかの `.wasm` が 16KB を超えたら PSRAM へ移す**(B 案) |
 | クリック / シリアルコンソールのタスクスタック | **internal 固定** | `xTaskCreateStatic` + 静的 BSS | 12 |
 | `xTaskCreate` 組のタスクスタック | **internal 固定** | IDF の既定 | `FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` は `xTaskCreateStatic` にしか効かない |

@@ -465,6 +465,24 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     - `device-regress.conf` の seq_smoke 保持時間を 60 秒に変更
   - **次**: Phase 18(Session 画面 + 単体再生)の指示書作成と、そのときの `docs/roadmap.md` 更新。
 
+- **Phase 18c(docs/prompts/phase18c.md、Session と小節の増減)完了(2026-09-20)。**
+  詳細は `docs/results/phase18c.md`。**編集機能の方針転換の 1 歩目**(spec §1.3 を改訂)。
+  - **行頭に `-`、最後の要素の次の行に `+`。`-` の長押し(点滅 → 離す)で削除、`+` のタップで追加。**
+    **できないとき(再生中の Session・上限・最後の 1 小節)は記号を出さない。**
+  - `seqcore` に `insert_bar` / `remove_bar`(**拍子の上書きをシフト**)/ `free_slot` /
+    `remove_session` / `session_mut` を追加。テスト 44 → **51 件**。
+  - **roadmap U-16 に着手: WAMR プールを 48KB → 64KB に戻した(承認済み)。**
+    `.wasm` が 17,497 B になり 48KB では **`create_exec_env failed`** で起動しなくなったため。
+    Phase 7B-fix で縮めた理由(linear memory の連続確保)は **Phase 15 で PSRAM へ移って消えていた**。
+    結果: プール消費 48,704 / 65,344(**余裕 16,640 B**)。代償は internal の静的 +16KB で
+    **free_int 89,368 / largest_int 40,960**(しきい値まで 9.4KB / 8.2KB)。
+  - **`.wasm` 17,497 B で 16KB 超**。roadmap **U-6 が現実の課題**になった(申し送り)。
+  - **検証**: Linux で追加・削除・点滅(画素判定)・拍子上書きのシフト・再生中の編集不可を確認。
+    MIDI は **S02 = 720 発 / 小節を足した S01 = 480 発、停止中 0 発**。
+    実機は 64KB プールで sequencer ほか 4 本が起動・反復 3 回 PASS。
+    **実機のタッチ操作(削除・追加)はユーザーが確認済み**(2026-09-20、指摘なし。映像は残していない)。
+  - **回帰は 18b とあわせて未実施**(ユーザー指示。Phase 18 シリーズの最後にまとめて回す)。
+
 - **Phase 18b(docs/prompts/phase18b.md、ヘッダに操作を集約する)完了(2026-09-20)。**
   詳細は `docs/results/phase18b.md`。18a の試用で出た 3 点を直した。
   - **パンくず(ヘッダ左)のタップで 1 階層戻る。** 最上位では何もしない(アプリを終了させるのは HW キーだけ)。

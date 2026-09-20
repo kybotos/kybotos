@@ -23,9 +23,15 @@ static const char* TAG = "WASM";
 // Phase 4 実測でデモ規模の消費は ~27KB。Phase 7B でクリックタスク等の静的確保が
 // 増えた際、system heap の最大連続ブロックが 15KB まで細り linear memory
 // (~20KB 連続)が確保できなくなったため、64KB → 48KB に縮小して静的メモリを
-// 返却(実測消費に対し余裕 ~20KB)。プール枯渇時は instantiate が
-// 「allocate memory failed」(linear ではなく)で落ちるので区別できる。
-static uint8_t s_wamr_heap[48 * 1024];
+// 返却した。プール枯渇時は instantiate が「allocate memory failed」(linear では
+// なく)で落ちるので区別できる。
+//
+// **Phase 18c で 64KB に戻した(roadmap U-16、ユーザー承認済み)。**
+// 縮小の理由だった「linear memory の連続確保」は **Phase 15 で linear memory が
+// PSRAM へ移った**ことで成立しなくなった(docs/lessons.md「PSRAM 本番反映」、
+// `os_mmap` は MALLOC_CAP_SPIRAM を使う)。UI が育った sequencer は 48KB では
+// `create_exec_env failed` になり、ロードできなくなっていた。
+static uint8_t s_wamr_heap[64 * 1024];
 
 namespace wasmrt {
 
