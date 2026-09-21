@@ -44,7 +44,16 @@ static const char* TAG = "WASM";
 // **Phase 19b で 96KB にした(ユーザー承認済み)。** タイルの編集(追加 / 並べ替え / 削除 / 名称)を
 // 積むと 80KB では足りない見込みだったため。**同時に U-6 を実施して `.wasm` バッファを PSRAM へ移した**
 // ので、internal の収支は「静的 +16KB / 実行中の malloc −26KB」になる。
-static uint8_t s_wamr_heap[96 * 1024];
+//
+// **Phase 20 で 112KB にした(ユーザー承認済み)。** 永続化(Save / Load)を積んだ sequencer
+// (`.wasm` 39,383 B)は **96KB では instantiate が「allocate memory failed」で落ちる**。
+// プールを一時的に 128KB にして実測したところ **highmark 101,192 B** で、96KB(実効 98,112)に
+// 対して 3,080 B 足りなかった。112KB なら残り約 13KB。**`.wasm` の増分に対するプールの増分は
+// 今回 2.42 倍**(+8,031 B に対して +19,632 B)。
+// 代償は internal の静的 +16KB だが、**`largest_int` は 31,744 のまま動かない**(32KB DRAM
+// バンクの構造的上限。プールを 128KB にしても変わらないことを実測で確認した)ので、
+// 下がるのは `free_int` だけ。回帰の `MIN_FREE_INT` を新しい基準値に合わせて下げてある。
+static uint8_t s_wamr_heap[112 * 1024];
 
 namespace wasmrt {
 
