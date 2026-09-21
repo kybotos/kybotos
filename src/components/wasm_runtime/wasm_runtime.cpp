@@ -60,10 +60,16 @@ static const char* TAG = "WASM";
 // (docs/architecture.md §9 に明記済み)。19b で `.wasm` バッファを PSRAM へ移したのと同じ手で、
 // **internal の静的を 112KB まるごと返す**。これで `.wasm` の伸びしろが internal RAM の
 // 天井から切り離され、プールの拡大は PSRAM(8MB)の側の話になる。
-// **本フェーズでは大きさを変えない**(変える変数を 1 つに絞って影響を測るため。
-// 増やすのは Phase 21a)。PSRAM から取れなければ**隠さずに起動を止める**
+// Phase 21 では大きさを変えなかった(変える変数を 1 つに絞って影響を測るため)。
+// PSRAM から取れなければ**隠さずに起動を止める**
 // (CONFIG_SPIRAM は Phase 15 以降 常に有効なので、失敗は構成ミスである)。
-static constexpr size_t kWamrPoolBytes = 112 * 1024;
+//
+// **Phase 21a で 128KB にした(ユーザー承認済み)。** ドラムマシンのパターン画面を積んだ
+// sequencer(`.wasm` 43,705 B)は **112KB では `create_exec_env failed`**(8KB の WASM
+// スタックが取れない)。**プールが PSRAM にあるので internal RAM は 1 バイトも減らず**、
+// 代償は `free_psram` が 16KB 下がるだけである(余裕 186KB)。
+// **これが「プールの拡大が internal の天井から外れた」ことの最初の実例**になる。
+static constexpr size_t kWamrPoolBytes = 128 * 1024;
 static uint8_t* s_wamr_heap = nullptr;
 
 namespace wasmrt {
