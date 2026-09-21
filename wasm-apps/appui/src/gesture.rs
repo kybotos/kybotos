@@ -41,6 +41,12 @@ pub enum Action {
     Shuttle { dx: i32, dy: i32 },
     /// シャトルを離した(値の変更を確定する)
     ShuttleEnd,
+    /// **ドラッグ中**(アプリが [`Gesture::allow_drag`] を立てている間だけ起きる。Phase 19b)。
+    /// `dx` / `dy` は**押下位置からの累積移動量**(右・下が正)。
+    /// スワイプ(スクロール)と違って**横方向でも取り消されない**ので、要素を掴んで運べる
+    Drag { dx: i32, dy: i32 },
+    /// ドラッグを離した(移動を確定する)
+    DragEnd,
     /// 長押し / タップが取り消された(スワイプに移行、または横方向へ動いた)
     Cancel,
 }
@@ -56,6 +62,8 @@ enum State {
     Scrolling,
     /// 長押しの後のドラッグ中(シャトル)
     Shuttling,
+    /// 要素を掴んで運んでいる(`allow_drag` のとき。Phase 19b)
+    Dragging,
     /// この押下ではもう何も起こさない(横スワイプ)
     Dead,
 }
@@ -72,6 +80,8 @@ pub struct Gesture {
     /// シャトル中の累積移動量(右・下が正)。指が止まっていても tick で返すため保持する
     dx: i32,
     dy: i32,
+    /// 押下からのドラッグを許すか(編集モードなど。Phase 19b)
+    drag_ok: bool,
 }
 
 impl Default for Gesture {
@@ -87,7 +97,7 @@ fn elapsed(now: u32, since: u32) -> i32 {
 
 impl Gesture {
     pub const fn new() -> Gesture {
-        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true, dx: 0, dy: 0 }
+        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true, dx: 0, dy: 0, drag_ok: false }
     }
 
     /// 長押しが成立していて、まだ離していないか(点滅させるかの判断に使う)
@@ -101,6 +111,17 @@ impl Gesture {
             State::Idle => None,
             _ => Some((self.x, self.y)),
         }
+    }
+
+    /// **押下からのドラッグを許すか**(Phase 19b)。アプリが編集モードの間だけ立てる。
+    /// **false のときの判定は一切変わらない**(既存アプリは影響を受けない)
+    pub fn allow_drag(&mut self, allow: bool) {
+        self.drag_ok = allow;
+    }
+
+    /// 要素を掴んで運んでいる最中か
+    pub fn dragging(&self) -> bool {
+        matches!(self.state, State::Dragging)
     }
 
     /// 縦スワイプ中か
@@ -138,6 +159,11 @@ impl Gesture {
         match self.state {
             State::Idle | State::Dead => Action::None,
             State::Scrolling => Action::Scroll { dy },
+            State::Dragging => {
+                self.dx = dx;
+                self.dy = dy;
+                Action::Drag { dx, dy }
+            }
             State::Shuttling => {
                 self.dx = dx;
                 self.dy = dy;
@@ -150,6 +176,17 @@ impl Gesture {
                 self.dx = dx;
                 self.dy = dy;
                 Action::Shuttle { dx, dy }
+            }
+            // ドラッグが許されているなら、縦横どちらでも掴んで運ぶ方に倒す(Phase 19b)
+            State::Pressed | State::Armed
+                if self.drag_ok
+                    && (dx.abs() >= SWIPE_MIN_MOVE || dy.abs() >= SWIPE_MIN_MOVE) =>
+            {
+                self.state = State::Dragging;
+                self.tap_ok = false;
+                self.dx = dx;
+                self.dy = dy;
+                Action::Drag { dx, dy }
             }
             State::Pressed | State::Armed => {
                 if dy.abs() >= SWIPE_MIN_MOVE && dy.abs() > dx.abs() {
@@ -188,6 +225,7 @@ impl Gesture {
         match state {
             State::Armed => Action::LongPressFired { x, y },
             State::Shuttling => Action::ShuttleEnd,
+            State::Dragging => Action::DragEnd,
             State::Pressed if self.tap_ok => Action::Tap { x, y },
             _ => Action::None,
         }
@@ -389,5 +427,58 @@ mod tests {
             g.tick(t0.wrapping_add(LONG_PRESS_MS)),
             Action::LongPressArmed { x: 10, y: 20 }
         );
+    }
+
+    // ---- Phase 19b: 掴んで運ぶドラッグ ----
+
+    #[test]
+    fn drag_is_off_by_default_and_behaves_as_before() {
+        let mut g = Gesture::new();
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        // 横へ大きく動かしても、従来どおり取り消されるだけ(横スワイプは v1 未使用)
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 140, 100, 50), Action::Cancel);
+        assert_eq!(g.on_event(EV_TOUCH_UP, 140, 100, 60), Action::None);
+    }
+
+    #[test]
+    fn drag_reports_both_axes_and_ends_on_release() {
+        let mut g = Gesture::new();
+        g.allow_drag(true);
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        // 閾値までは何も起きない
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 108, 100, 20), Action::None);
+        // 横へ超えたらドラッグ(取り消されない)
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 130, 106, 40), Action::Drag { dx: 30, dy: 6 });
+        assert!(g.dragging());
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 90, 150, 60), Action::Drag { dx: -10, dy: 50 });
+        assert_eq!(g.on_event(EV_TOUCH_UP, 90, 150, 80), Action::DragEnd);
+        assert!(!g.dragging());
+    }
+
+    #[test]
+    fn drag_takes_precedence_over_scroll_while_allowed() {
+        let mut g = Gesture::new();
+        g.allow_drag(true);
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        // 縦でもスクロールではなくドラッグになる
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 100, 130, 40), Action::Drag { dx: 0, dy: 30 });
+        assert!(!g.scrolling());
+    }
+
+    #[test]
+    fn drag_can_be_turned_off_again() {
+        let mut g = Gesture::new();
+        g.allow_drag(true);
+        g.allow_drag(false);
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 100, 130, 40), Action::Scroll { dy: 30 });
+    }
+
+    #[test]
+    fn a_tap_still_works_while_drag_is_allowed() {
+        let mut g = Gesture::new();
+        g.allow_drag(true);
+        g.on_event(EV_TOUCH_DOWN, 50, 60, 0);
+        assert_eq!(g.on_event(EV_TOUCH_UP, 50, 60, 100), Action::Tap { x: 50, y: 60 });
     }
 }

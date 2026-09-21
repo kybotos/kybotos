@@ -40,7 +40,11 @@ static const char* TAG = "WASM";
 // 代償は internal の静的 +16KB で、**回帰のしきい値(`scripts/device-regress.conf` の
 // `MIN_FREE_INT` / `MIN_LARGEST_INT`)を新しい基準値に合わせて下げてある**。
 // 判断の記録は docs/architecture.md §9 と docs/results/phase19.md。
-static uint8_t s_wamr_heap[80 * 1024];
+//
+// **Phase 19b で 96KB にした(ユーザー承認済み)。** タイルの編集(追加 / 並べ替え / 削除 / 名称)を
+// 積むと 80KB では足りない見込みだったため。**同時に U-6 を実施して `.wasm` バッファを PSRAM へ移した**
+// ので、internal の収支は「静的 +16KB / 実行中の malloc −26KB」になる。
+static uint8_t s_wamr_heap[96 * 1024];
 
 namespace wasmrt {
 
@@ -135,7 +139,13 @@ char s_app_path[160];
 AppStoppedCb s_on_stopped = nullptr;
 char s_app_error[160];
 
-// SD 上のファイルを malloc したバッファへ読む。失敗時 nullptr。
+// SD 上のファイルを **PSRAM の**バッファへ読む。失敗時 nullptr。
+//
+// **Phase 19b で internal から PSRAM へ移した(roadmap U-6、ユーザー承認済み)。**
+// interpreter はこのバッファを unload まで参照する(fast-interp は in-place 書き換えもする)ので、
+// アプリが走っている間ずっと internal を占有していた(sequencer で 26KB)。
+// linear memory は Phase 15 で既に PSRAM にあり、**internal に残る大物は WAMR プール本体だけ**になる。
+// 解放は `heap_caps_free`(`free` でも同じ実体だが、確保と対で読めるようにする)。
 uint8_t* read_wasm_file(const char* path, uint32_t* out_size)
 {
     FILE* f = fopen(path, "rb");
@@ -151,10 +161,10 @@ uint8_t* read_wasm_file(const char* path, uint32_t* out_size)
         fclose(f);
         return nullptr;
     }
-    uint8_t* buf = (uint8_t*)malloc(size);
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf || fread(buf, 1, size, f) != (size_t)size) {
         snprintf(s_app_error, sizeof(s_app_error), "read failed: %s", path);
-        free(buf);
+        heap_caps_free(buf);
         fclose(f);
         return nullptr;
     }
@@ -347,7 +357,7 @@ void* app_thread(void*)
     if (exec_env) wasm_runtime_destroy_exec_env(exec_env);
     if (inst) wasm_runtime_deinstantiate(inst);
     if (module) wasm_runtime_unload(module);
-    if (wasm_buf) free(wasm_buf);
+    if (wasm_buf) heap_caps_free(wasm_buf); // Phase 19b: PSRAM から確保している
 
     // 1 行目は device-regress.sh が読む書式(free heap / largest block の語を維持)。
     // Phase 15 で値の意味を **internal 基準**へ改めた(PSRAM 込みの合計では
