@@ -121,6 +121,12 @@ herdr pane list --workspace 1            # 初回のみ: JSON 構造の実物を
 実際の JSON に合わせて修正し、修正内容を報告すること(改修は §5 の手続き。
 一巡チェックモード §4 の実行中はスクリプトを修正せず、報告して停止する)。
 
+**ペインでページャに入るコマンドを叩かない。** `git log` / `git diff` のように出力が長いコマンドは
+`less` に入り、**そのあとに送ったコマンドがページャの検索文字列として飲まれる**
+(`Invalid pattern (press RETURN)` が出たままペインが固まり、`hpane.sh run` がタイムアウトする。
+Phase 20 で踏んだ)。**`git --no-pager log` のようにページャを切って使う**こと。
+入ってしまったら `herdr pane send-keys <pane_id> "q"` で抜ける。
+
 ビルドキャッシュ関連のエラー(例: `cmake` の
 `CMakeCache.txt directory ... is different than the directory ... where
 CMakeCache.txt was created`、`idf.py` の managed_components ハッシュ不一致等)が
@@ -407,6 +413,39 @@ DISPLAY=:0 xdotool click --window "$WIN" 1
 
 - 撮影のタイミングを ms で待つときは `sleep "$(printf '%d.%03d' $((ms/1000)) $((ms%1000)))"`。
   `sleep 0.$(printf %03d $ms)` は 1,000ms を超えると桁が崩れる(Phase 18 で撮り逃した)。
+
+### 3.7 Linux ホストの回帰(6 本)(Phase 20 で明文化)
+
+実機の自動回帰(§3.4)に対応する Linux 側。**フェーズ末に毎回やる**ので手順を固定する。
+対象は `scripts/device-regress.conf` の `APPS` と同じ 6 本
+(touch_demo / mp3player / metronome / midi_loopback / seq_smoke / sequencer)。
+
+各アプリについて次を順に行う(短いループを書いて回してよい。スクリプトは `scripts/` に置いていない):
+
+```bash
+# 1) 起動。**出力はログファイルへ**(ペインのスクロールバックに誤マッチさせないため)
+./scripts/hpane.sh send unix-build \
+  "cd <repo>/hosts/linux && DISPLAY=:0 ./build/midibox_host ../../wasm-apps/<app>/<app>.wasm \
+   > <repo>/captures/<タスク名>/regress/<app>.log 2>&1"
+# 2) 起動したことは **pgrep** で確かめる(`waitfor` は前回の行に一致しうる)
+until pgrep -x midibox_host >/dev/null; do sleep 0.25; done
+sleep 5
+# 3) pid と一致するウィンドウへ ESC(§3.1 と同じ選び方)
+DISPLAY=:0 xdotool key --window <win> Escape
+until ! pgrep -x midibox_host >/dev/null; do sleep 0.25; done
+# 4) ログで判定
+grep -c "app started" <app>.log; grep -c "app stopped" <app>.log
+grep -cE "no free slot|WARN|ERROR" <app>.log     # 0 であること
+grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録に残す
+```
+
+- **合否**: `app started` と `app stopped` が各 1 回以上、**警告 0 件**、プロセスの残留なし。
+- **プール消費(highmark)は毎回表に残す。** 既存アプリの値が前フェーズと変わっていなければ、
+  **Host API の追加などが既存アプリに影響していない**ことの裏づけになる
+  (Phase 20 では 5 本とも 19a / 19b と 1 バイトも同じだった)。
+- **stdout をパイプに通さない**という §3.1 の注意は `waitfor` を使う場合の話で、
+  ここでは**プロセスの終了後にファイルを読む**のでリダイレクトでよい。
+- **実機の回帰と同時に走らせない**(§3.4。実機の MIDI をホストが受けて警告が出る)。
 
 ## §4 一巡チェックモード(routine)
 
