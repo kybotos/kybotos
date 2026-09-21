@@ -621,6 +621,25 @@ static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
     int i;
     SDL_Rect r;
     if (p[0] != 0xEF) return 0;
+    if (p[1] == 0x80 && p[2] == 0x81) { /* U+F001: 実機は ♪。ここではメトロノームの形で描く */
+        SDL_SetRenderDrawColor(s_renderer, (rgb888 >> 16) & 0xff, (rgb888 >> 8) & 0xff,
+                               rgb888 & 0xff, 255);
+        for (i = 0; i < 6; ++i) { /* 台形の本体(下ほど広い) */
+            r.x = x + 5 - i;
+            r.y = y + 6 + i;
+            r.w = 2 + i * 2;
+            r.h = 1;
+            SDL_RenderFillRect(s_renderer, &r);
+        }
+        for (i = 0; i < 6; ++i) { /* 振り子(本体の上に出る右上がりの棒) */
+            r.x = x + 6 + i / 2;
+            r.y = y + 6 - i;
+            r.w = 1;
+            r.h = 1;
+            SDL_RenderFillRect(s_renderer, &r);
+        }
+        return SYM_W;
+    }
     if (p[1] == 0x80 && p[2] == 0x8D) { /* U+F00D ✕(2 本の斜線) */
         SDL_SetRenderDrawColor(s_renderer, (rgb888 >> 16) & 0xff, (rgb888 >> 8) & 0xff,
                                rgb888 & 0xff, 255);
