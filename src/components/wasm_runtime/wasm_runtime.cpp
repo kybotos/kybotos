@@ -53,7 +53,18 @@ static const char* TAG = "WASM";
 // 代償は internal の静的 +16KB だが、**`largest_int` は 31,744 のまま動かない**(32KB DRAM
 // バンクの構造的上限。プールを 128KB にしても変わらないことを実測で確認した)ので、
 // 下がるのは `free_int` だけ。回帰の `MIN_FREE_INT` を新しい基準値に合わせて下げてある。
-static uint8_t s_wamr_heap[112 * 1024];
+//
+// **Phase 21 で PSRAM へ移した(ユーザー承認済み)。大きさは 112KB のまま。**
+// internal 固定にしていた理由(7B-fix: system heap の最大連続ブロックを linear memory の
+// ために残す)は **Phase 15 で linear memory が PSRAM へ移ったことで既に失効していた**
+// (docs/architecture.md §9 に明記済み)。19b で `.wasm` バッファを PSRAM へ移したのと同じ手で、
+// **internal の静的を 112KB まるごと返す**。これで `.wasm` の伸びしろが internal RAM の
+// 天井から切り離され、プールの拡大は PSRAM(8MB)の側の話になる。
+// **本フェーズでは大きさを変えない**(変える変数を 1 つに絞って影響を測るため。
+// 増やすのは Phase 21a)。PSRAM から取れなければ**隠さずに起動を止める**
+// (CONFIG_SPIRAM は Phase 15 以降 常に有効なので、失敗は構成ミスである)。
+static constexpr size_t kWamrPoolBytes = 112 * 1024;
+static uint8_t* s_wamr_heap = nullptr;
 
 namespace wasmrt {
 
@@ -117,11 +128,24 @@ void log_stats(const char* name, uint32_t* v, int n)
 
 bool runtime_init()
 {
+    if (!s_wamr_heap) {
+        // WAMR の pool allocator は先頭を自前で整列するが、明示的に 16B 境界で取る。
+        // 起動時 1 回だけで、解放はしない(恒久物)。
+        s_wamr_heap = (uint8_t*)heap_caps_aligned_alloc(16, kWamrPoolBytes, MALLOC_CAP_SPIRAM);
+        if (!s_wamr_heap) {
+            ESP_LOGE(TAG, "WAMR pool alloc failed (%u bytes from PSRAM)",
+                     (unsigned)kWamrPoolBytes);
+            return false;
+        }
+        ESP_LOGI(TAG, "WAMR pool %u bytes at %p (%s)", (unsigned)kWamrPoolBytes,
+                 (void*)s_wamr_heap, heap_mem_where(s_wamr_heap));
+    }
+
     RuntimeInitArgs init_args;
     memset(&init_args, 0, sizeof(init_args));
     init_args.mem_alloc_type = Alloc_With_Pool;
     init_args.mem_alloc_option.pool.heap_buf = s_wamr_heap;
-    init_args.mem_alloc_option.pool.heap_size = sizeof(s_wamr_heap);
+    init_args.mem_alloc_option.pool.heap_size = kWamrPoolBytes;
 
     if (!wasm_runtime_full_init(&init_args)) {
         ESP_LOGE(TAG, "wasm_runtime_full_init failed");
@@ -132,7 +156,7 @@ bool runtime_init()
         return false;
     }
     ESP_LOGI(TAG, "runtime ready (pool %u bytes), free heap %u",
-             (unsigned)sizeof(s_wamr_heap), (unsigned)heap_caps_get_free_size(kCapsInt));
+             (unsigned)kWamrPoolBytes, (unsigned)heap_caps_get_free_size(kCapsInt));
     return true;
 }
 
