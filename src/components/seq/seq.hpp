@@ -18,6 +18,12 @@ namespace seq {
 using ClickHandler = void (*)(uint32_t slot);
 void SetClickHandler(ClickHandler fn);
 
+// SYNTH ポート(内蔵音源、Phase 21)の発音ハンドラ。CLICK と同じ理由で
+// コールバックにしてある(呼び出しは esp_timer タスク上・ロック外)。
+// at_host_us はそのイベントが鳴るべき時刻(音楽時間軸)。
+using SynthHandler = void (*)(uint8_t note, uint8_t velocity, int64_t at_host_us);
+void SetSynthHandler(SynthHandler fn);
+
 // 起動時に 1 回(app_main から。midi::Midi_Init の後)。
 void Init();
 

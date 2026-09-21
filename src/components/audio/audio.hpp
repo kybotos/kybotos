@@ -11,6 +11,7 @@ extern "C" {
 #else
 #define HAVE_ESP_AUDIO_PLAYER 0
 #endif
+#include "hostapi_defs.h"   // Phase 21: HOSTAPI_SYNTH_VOICES / ドラムの note 番号
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -50,11 +51,20 @@ public:
     // level 0..100 はトーン固有ゲイン(マスター音量と乗算)。
     bool play_tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level) noexcept;
 
+    // ミキサへの発音依頼(Phase 21)。velocity != 0 なら内蔵音源(SYNTH)の打点、
+    // 0 なら CLICK ポート / tone_play の減衰サイン。
     struct ToneMsg {
         uint16_t freq_hz;
         uint16_t dur_ms;
         uint8_t level;
+        uint8_t note;     // SYNTH: GM ドラムの note 番号
+        uint8_t velocity; // SYNTH: 1..127。0 = トーン
     };
+
+    // 内蔵音源(HOSTAPI_PORT_SYNTH)の発音依頼。契約は shared/hostapi_defs.h。
+    bool play_drum(uint8_t note, uint8_t velocity) noexcept;
+    // 鳴っているボイスを消す(transport 停止 / アプリ破棄)。
+    void synth_reset() noexcept;
 
     // Start playback of a file via audio_player when available (fallback stubs otherwise)
     bool play_file(const std::string& path) noexcept;
@@ -73,9 +83,8 @@ private:
     bool ensure_i2s(uint32_t rate_hz, uint8_t bits, bool stereo) noexcept;
     bool reconfig_rate(uint32_t rate_hz, uint32_t bits_cfg, i2s_slot_mode_t ch) noexcept;
     bool i2s_write(void* data, size_t len, uint32_t timeout_ms, size_t* written = nullptr) noexcept;
-    void ensure_click_task() noexcept;
-    void click_task_loop() noexcept;
-    void tone_write_now(const ToneMsg& msg) noexcept;
+    void ensure_click_task() noexcept;   // Phase 21: ミキサタスク
+    void click_task_loop() noexcept;     // Phase 21: ブロックミキサ本体
 #if HAVE_ESP_AUDIO_PLAYER
     static esp_err_t write_fn(void* audio_buffer, size_t len, size_t* bytes_written, uint32_t timeout_ms);
     static esp_err_t clk_set_fn(uint32_t rate, uint32_t bits_cfg, i2s_slot_mode_t ch);
@@ -115,6 +124,8 @@ extern "C" {
     void Audio_Click_Init(void);   // I2S のみ初期化(クリック音用)
     void Play_Click(void);         // クリック音を再生
     bool Play_Tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level); // 減衰サイン (7C)
+    bool Play_Drum(uint8_t note, uint8_t velocity);  // 内蔵音源 (Phase 21)
+    void Synth_Reset(void);                          // 鳴っている音を消す (Phase 21)
     void Play_Music(const char* directory, const char* fileName);
     void Music_resume(void);
     void Music_pause(void);

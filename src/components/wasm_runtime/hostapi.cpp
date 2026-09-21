@@ -317,6 +317,15 @@ void seq_click_handler(uint32_t slot)
     audio::Play_Tone(tone.freq_hz, tone.dur_ms, tone.level);
 }
 
+// L0 の SYNTH ポート(内蔵音源、Phase 21)。CLICK と同じくミキサの発音キューに
+// 積むだけで、I2S を二重に触ることはない。at_host_us は案 A では使わない
+// (docs/results/phase21.md 0-c。案 B へ移るときにブロック内オフセットへ使う)。
+void seq_synth_handler(uint8_t note, uint8_t velocity, int64_t at_host_us)
+{
+    (void)at_host_us;
+    audio::Play_Drum(note, velocity);
+}
+
 int32_t tone_play_impl(int32_t slot)
 {
     ToneDef tone;
@@ -718,6 +727,7 @@ void hostapi_audio_reset()
     s_click_fire_count = 0;
     portEXIT_CRITICAL(&s_click_mux);
     tone_table_reset(); // トーンパレットも初期状態へ (Phase 7C 契約)
+    audio::Synth_Reset(); // 鳴っているボイスを消す (Phase 21 の契約)
     audio::Volume_adjustment(98);
     midi::Midi_Reset(); // MIDI Clock 生成も必ず停止する (Phase 8b 契約)
     seq::Reset();       // L0/L1 も初期状態へ (Phase 11)
@@ -727,6 +737,7 @@ bool hostapi_register_natives()
 {
     tone_table_reset();
     seq::SetClickHandler(seq_click_handler); // L0 の CLICK ポート (Phase 11)
+    seq::SetSynthHandler(seq_synth_handler); // L0 の SYNTH ポート (Phase 21)
     if (!wasm_runtime_register_natives(
             "env", s_native_symbols,
             sizeof(s_native_symbols) / sizeof(s_native_symbols[0]))) {

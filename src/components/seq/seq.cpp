@@ -21,6 +21,7 @@ portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
 esp_timer_handle_t s_timer = nullptr;
 ClickHandler s_click_handler = nullptr;
+SynthHandler s_synth_handler = nullptr;
 
 int64_t hook_now_us() { return clockauth::NowUs(); }
 void hook_lock() { portENTER_CRITICAL(&s_mux); }
@@ -49,9 +50,14 @@ void hook_click(uint32_t slot)
     if (s_click_handler) s_click_handler(slot);
 }
 
+void hook_synth(uint8_t note, uint8_t velocity, int64_t at_host_us)
+{
+    if (s_synth_handler) s_synth_handler(note, velocity, at_host_us);
+}
+
 const seqcore_hooks_t kHooks = {
     hook_now_us, hook_lock, hook_unlock, hook_arm,
-    hook_disarm, hook_send_midi, hook_click,
+    hook_disarm, hook_send_midi, hook_click, hook_synth,
 };
 
 void dispatch_cb(void*) { seqcore_dispatch(); }
@@ -59,6 +65,7 @@ void dispatch_cb(void*) { seqcore_dispatch(); }
 } // namespace
 
 void SetClickHandler(ClickHandler fn) { s_click_handler = fn; }
+void SetSynthHandler(SynthHandler fn) { s_synth_handler = fn; }
 
 void Init()
 {

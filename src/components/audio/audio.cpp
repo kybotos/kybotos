@@ -117,96 +117,281 @@ bool Mp3Player::init_i2s_only(uint32_t sample_rate_hz, uint8_t bits, bool stereo
     return true;
 }
 
-// 発音依頼(ノンブロッキング)。実書き込みは click_task_loop が行う。
-// 二重クリック対策(Phase 7B fix): i2s_channel_write 直書きだと、クリック終端の
-// DMA アンダーフロー時に auto_clear とプリフェッチが競合し、クリック先頭が入った
-// 古いディスクリプタが 1 本再生される(実測: 全拍の ~25% で 26-27ms 後に再発音)。
-// 対策はゼロパディング書き込み(下記)で、それがブロッキングになるため専用タスク化。
+// ---- ブロックミキサ (Phase 21) ----
+//
+// Phase 7B-fix から Phase 20 までは「1 音を i2s_write で書き切り、続けて DMA リング
+// 1 周ぶんのゼロを書く」方式だった。ゼロ埋めはクリック終端の **DMA アンダーフロー**時に
+// auto_clear とプリフェッチが競合して古いディスクリプタが再生される現象(二重クリック)
+// への対策である。この方式は 1 音ずつ直列にしか鳴らせないので、内蔵音源(SYNTH ポート)は
+// 載せられなかった。
+//
+// Phase 21 で **常時 1 ブロック(240 フレーム = dma_frame_num)を書き続けるミキサ**に
+// 変えた。**常に書いているのでアンダーフロー自体が起きず、ゼロ埋めは構造的に不要**になる
+// (7B-fix の根拠がそのまま消える)。Linux ホストは元から pull 型ミキサで二重クリックが
+// 起きていなかったことも、この読みの裏づけである(docs/results/phase07.md 7B-fix)。
+//
+// 合成はキャッシュレス: サインは再帰振動子(回転行列)、ノイズは xorshift32。
+// サンプルごとに libm を呼ばない。音色の式は Linux ホスト(hosts/linux/hostapi_sdl.c)と同一。
+//
+// MP3 とは **排他**: esp_audio_player が同じ I2S へ write_fn から書くので、
+// MP3 再生中はミキサを止める(発音要求は捨てる)。docs/results/phase21.md 0-b。
+
+namespace {
+
+constexpr int kMixRate = 44100;
+constexpr int kMixBlock = 240; // I2S_CHANNEL_DEFAULT_CONFIG の dma_frame_num と同じ
+
+enum VoiceKind : uint8_t { VK_IDLE = 0, VK_TONE, VK_KICK, VK_SNARE, VK_HAT, VK_CRASH };
+
+struct Voice {
+    VoiceKind kind;
+    uint8_t note;
+    uint32_t seq;
+    int remaining;
+    float s, c, cw, sw;   // サイン(再帰振動子)
+    float decay, amp;
+    float f_cur, f_end, f_k; // ピッチ掃引(Kick)
+    uint32_t rng;            // ノイズ
+    float n_prev, n_amp, n_decay;
+};
+
+Voice s_voices[HOSTAPI_SYNTH_VOICES];
+uint32_t s_voice_seq;
+
+// ミキサのバッファはタスクスタックではなく静的に置く(恒久物は静的確保: 6B / 7B-fix)
+int32_t s_acc[kMixBlock];
+int16_t s_chunk[kMixBlock * 2];
+
+void voice_set_sine(Voice* v, float freq, int frames, float amp)
+{
+    const float w = 2.0f * (float)M_PI * freq / kMixRate;
+    v->s = 0.0f;
+    v->c = 1.0f;
+    v->cw = cosf(w);
+    v->sw = sinf(w);
+    v->amp = amp;
+    v->decay = expf(-3.5f / (float)(frames > 0 ? frames : 1));
+    v->remaining = frames;
+}
+
+// 空きボイス → 同じ note の最も古いもの → 全体で最も古いもの(hostapi_defs.h の契約)
+Voice* voice_alloc(uint8_t note)
+{
+    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
+        if (s_voices[i].kind == VK_IDLE || s_voices[i].remaining <= 0) return &s_voices[i];
+    }
+    Voice* best = nullptr;
+    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
+        if (s_voices[i].note == note && (!best || s_voices[i].seq < best->seq)) best = &s_voices[i];
+    }
+    if (!best) {
+        for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
+            if (!best || s_voices[i].seq < best->seq) best = &s_voices[i];
+        }
+    }
+    return best;
+}
+
+void voice_start_tone(const Mp3Player::ToneMsg& t, int master_vol)
+{
+    Voice* v = voice_alloc(0);
+    if (!v) return;
+    memset(v, 0, sizeof(*v));
+    v->kind = VK_TONE;
+    v->seq = ++s_voice_seq;
+    voice_set_sine(v, (float)t.freq_hz, kMixRate * t.dur_ms / 1000,
+                   12000.0f * t.level / 100.0f * master_vol / 100.0f);
+}
+
+// 基準レベルは **4 音同時 + クリックでクリップしない**ように決めた
+// (Linux の WAV で実測。4 音同時のピーク 19,839 / -4.3dBFS)
+void voice_start_drum(uint8_t note, uint8_t velocity, int master_vol)
+{
+    const float g = (float)velocity / 127.0f * (float)master_vol / 100.0f;
+    Voice* v = voice_alloc(note);
+    if (!v) return;
+    memset(v, 0, sizeof(*v));
+    v->seq = ++s_voice_seq;
+    v->note = note;
+    v->rng = 0x9E3779B9u ^ (uint32_t)note ^ (s_voice_seq << 8);
+    switch (note) {
+    case HOSTAPI_SYNTH_NOTE_KICK:
+        v->kind = VK_KICK;
+        voice_set_sine(v, 110.0f, kMixRate * 180 / 1000, 7000.0f * g);
+        v->f_cur = 110.0f;
+        v->f_end = 45.0f;
+        v->f_k = expf(-1.0f / ((float)kMixRate * 0.040f));
+        break;
+    case HOSTAPI_SYNTH_NOTE_SNARE:
+        v->kind = VK_SNARE;
+        voice_set_sine(v, 190.0f, kMixRate * 140 / 1000, 2800.0f * g);
+        v->n_amp = 5600.0f * g;
+        v->n_decay = expf(-4.5f / (float)(kMixRate * 140 / 1000));
+        break;
+    case HOSTAPI_SYNTH_NOTE_CHH:
+        v->kind = VK_HAT;
+        v->remaining = kMixRate * 45 / 1000;
+        v->n_amp = 5600.0f * g;
+        v->n_decay = expf(-5.0f / (float)v->remaining);
+        break;
+    case HOSTAPI_SYNTH_NOTE_CRASH:
+        v->kind = VK_CRASH;
+        v->remaining = kMixRate * 800 / 1000;
+        v->n_amp = 5600.0f * g;
+        v->n_decay = expf(-4.0f / (float)v->remaining);
+        break;
+    default:
+        v->kind = VK_IDLE; // 未知の note は何もしない(ログも出さない)
+        v->remaining = 0;
+        break;
+    }
+}
+
+inline float voice_noise(Voice* v)
+{
+    v->rng ^= v->rng << 13;
+    v->rng ^= v->rng >> 17;
+    v->rng ^= v->rng << 5;
+    return (float)((int32_t)v->rng) * (1.0f / 2147483648.0f);
+}
+
+// n フレームを acc にミックスする。**サンプル再生に差し替えるときはこの関数だけ**
+void voice_render(Voice* v, int32_t* acc, int n)
+{
+    if (v->remaining <= 0) { v->kind = VK_IDLE; return; }
+    if (n > v->remaining) n = v->remaining;
+
+    if (v->kind == VK_KICK) {
+        // ピッチ掃引はブロック単位で係数を作り直す(サンプルごとに cosf を呼ばない)
+        v->f_cur = v->f_end + (v->f_cur - v->f_end) * powf(v->f_k, (float)n);
+        const float w = 2.0f * (float)M_PI * v->f_cur / kMixRate;
+        v->cw = cosf(w);
+        v->sw = sinf(w);
+    }
+
+    for (int i = 0; i < n; i++) {
+        float out = 0.0f;
+        switch (v->kind) {
+        case VK_TONE:
+        case VK_KICK:
+        case VK_SNARE: {
+            const float s2 = v->s * v->cw + v->c * v->sw;
+            v->c = v->c * v->cw - v->s * v->sw;
+            v->s = s2;
+            v->amp *= v->decay;
+            out = v->amp * v->s;
+            if (v->kind == VK_SNARE) {
+                v->n_amp *= v->n_decay;
+                out += v->n_amp * voice_noise(v);
+            }
+            break;
+        }
+        case VK_HAT:
+        case VK_CRASH: {
+            const float x = voice_noise(v);
+            const float hp = x - v->n_prev; // 1 次ハイパス(差分)
+            v->n_prev = x;
+            v->n_amp *= v->n_decay;
+            out = v->n_amp * hp;
+            break;
+        }
+        default:
+            break;
+        }
+        acc[i] += (int32_t)out;
+    }
+    v->remaining -= n;
+    if (v->remaining <= 0) v->kind = VK_IDLE;
+}
+
+} // namespace
+
+// 発音依頼(ノンブロッキング)。実際の合成はミキサタスクが行う。
 bool Mp3Player::play_click() noexcept {
     return play_tone(1000, 30, 100); // v0 既定クリック
 }
 
 bool Mp3Player::play_tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level) noexcept {
     if (!tone_queue_) return false;
-    ToneMsg msg{freq_hz, dur_ms, level};
-    // 満杯(発音が密に重なった)ときは捨てる(v2 契約: 重なりはベストエフォート)
+    ToneMsg msg{freq_hz, dur_ms, level, 0, 0};
+    // 満杯(発音が密に重なった)ときは捨てる
     return xQueueSend(tone_queue_, &msg, 0) == pdTRUE;
 }
 
+// 内蔵音源(SYNTH ポート)の発音依頼。契約は shared/hostapi_defs.h
+bool Mp3Player::play_drum(uint8_t note, uint8_t velocity) noexcept {
+    if (!tone_queue_) return false;
+    ToneMsg msg{0, 0, 0, note, velocity};
+    return xQueueSend(tone_queue_, &msg, 0) == pdTRUE;
+}
+
+void Mp3Player::synth_reset() noexcept {
+    // 鳴っているボイスを消す(transport_stop / アプリ破棄。hostapi_defs.h の契約)
+    if (tone_queue_) xQueueReset(tone_queue_);
+    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) s_voices[i].kind = VK_IDLE;
+}
+
 // タスクスタック等は静的確保(BSS)。ヒープから取ると最大連続ブロックを
-// 分断して WASM の linear memory 確保(~20KB 連続)を壊すため(6B の教訓)。
+// 分断して WASM の linear memory 確保を壊すため(6B の教訓)。
 static uint8_t s_click_stack[4096];
 static StaticTask_t s_click_tcb;
-static uint8_t s_tone_queue_buf[4 * sizeof(Mp3Player::ToneMsg)];
+static uint8_t s_tone_queue_buf[16 * sizeof(Mp3Player::ToneMsg)];
 static StaticQueue_t s_tone_queue_cb;
 
 void Mp3Player::ensure_click_task() noexcept {
     if (click_task_) return;
-    tone_queue_ = xQueueCreateStatic(4, sizeof(ToneMsg), s_tone_queue_buf,
+    tone_queue_ = xQueueCreateStatic(16, sizeof(ToneMsg), s_tone_queue_buf,
                                      &s_tone_queue_cb);
     if (!tone_queue_) return;
     auto fn = [](void* arg) { static_cast<Mp3Player*>(arg)->click_task_loop(); };
-    click_task_ = xTaskCreateStatic(fn, "click", sizeof(s_click_stack), this, 18,
+    click_task_ = xTaskCreateStatic(fn, "mixer", sizeof(s_click_stack), this, 18,
                                     s_click_stack, &s_click_tcb);
     if (!click_task_) {
-        ESP_LOGE(TAG, "click task create failed");
+        ESP_LOGE(TAG, "mixer task create failed");
     }
 }
 
+// ミキサ本体。**常時 1 ブロックを書き続ける**ので i2s_channel_write が
+// このループのペースを作る(タイマは要らない)。
 void Mp3Player::click_task_loop() noexcept {
-    ToneMsg msg;
     for (;;) {
-        if (xQueueReceive(tone_queue_, &msg, portMAX_DELAY) == pdTRUE) {
-            tone_write_now(msg);
+        // MP3 が鳴っている間は書かない(同じ I2S を audio_player が使う)。
+        // 溜まった発音要求は捨てる(契約どおり)。
+        if (is_playing() || is_paused()) {
+            xQueueReset(tone_queue_);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
         }
-    }
-}
-
-// パラメトリック減衰サインをキャッシュレスで合成しながら書く (Phase 7C)。
-// 再帰振動子(回転行列)なのでサンプルごとの libm 呼び出しは無い。
-void Mp3Player::tone_write_now(const ToneMsg& msg) noexcept {
-    if (!tx_) return;
-
-    // MP3(22.05kHz 等)再生後に I2S レートが変わったままだと半分のピッチで
-    // 鳴るため、発音前に 44.1kHz へ戻す(同一設定なら reconfig は no-op)
-    if (cur_rate_ != 44100 || cur_bits_ != 16 || !cur_stereo_) {
-        if (!ensure_i2s(44100, 16, true)) return;
-    }
-
-    constexpr int kSampleRate = 44100;
-    const int total = (int)kSampleRate * msg.dur_ms / 1000;
-    const float w = 2.0f * (float)M_PI * (float)msg.freq_hz / kSampleRate;
-    const float cw = cosf(w);
-    const float sw = sinf(w);
-    // エンベロープ: dur_ms 終端で e^-3.5 ≒ -30dB(既定クリック 30ms は従来と同等)
-    const float decay = expf(-3.5f / (float)total);
-    float amp = 12000.0f * msg.level / 100.0f * volume_.load() / 100.0f;
-    float s = 0.0f, c = 1.0f; // sin/cos の回転状態
-
-    int16_t chunk[240 * 2]; // 1 DMA ディスクリプタぶん(タスクスタック上)
-    int done = 0;
-    while (done < total) {
-        int n = total - done;
-        if (n > 240) n = 240;
-        for (int i = 0; i < n; ++i) {
-            const float s2 = s * cw + c * sw;
-            c = c * cw - s * sw;
-            s = s2;
-            amp *= decay;
-            const int16_t v = (int16_t)(amp * s);
-            chunk[i * 2] = v;
-            chunk[i * 2 + 1] = v;
+        if (!tx_) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+        // MP3 が 22.05kHz 等へ変えたままなら 44.1kHz へ戻す(同一設定なら no-op)
+        if (cur_rate_ != kMixRate || cur_bits_ != 16 || !cur_stereo_) {
+            if (!ensure_i2s(kMixRate, 16, true)) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
         }
-        i2s_write(chunk, (size_t)n * 2 * sizeof(int16_t), 100);
-        done += n;
-    }
 
-    // DMA リング(既定 6 ディスクリプタ × 240 フレーム)を丸ごとゼロで上書きする。
-    // アンダーフロー時に古いディスクリプタがプリフェッチ再生されても無音になる。
-    // 書き込みでブロックするが、専用タスクなので無害。
-    static const int16_t zeros[240 * 2] = {};
-    for (int i = 0; i < 6; ++i) {
-        i2s_write((void*)zeros, sizeof(zeros), 100);
+        // ブロックの先頭で、溜まっている発音要求をすべて開始する
+        const int vol = volume_.load();
+        ToneMsg msg;
+        while (xQueueReceive(tone_queue_, &msg, 0) == pdTRUE) {
+            if (msg.velocity) voice_start_drum(msg.note, msg.velocity, vol);
+            else              voice_start_tone(msg, vol);
+        }
+
+        memset(s_acc, 0, sizeof(s_acc));
+        bool any = false;
+        for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) {
+            if (s_voices[v].kind != VK_IDLE) { voice_render(&s_voices[v], s_acc, kMixBlock); any = true; }
+        }
+        if (any) {
+            for (int i = 0; i < kMixBlock; i++) {
+                int32_t v = s_acc[i];
+                if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+                s_chunk[i * 2] = (int16_t)v;
+                s_chunk[i * 2 + 1] = (int16_t)v;
+            }
+        } else {
+            memset(s_chunk, 0, sizeof(s_chunk));
+        }
+        i2s_write(s_chunk, sizeof(s_chunk), 100);
     }
 }
 
@@ -396,6 +581,14 @@ extern "C" void Play_Click(void) {
 
 extern "C" bool Play_Tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level) {
     return g_player && g_player->play_tone(freq_hz, dur_ms, level);
+}
+
+extern "C" bool Play_Drum(uint8_t note, uint8_t velocity) {
+    return g_player && g_player->play_drum(note, velocity);
+}
+
+extern "C" void Synth_Reset(void) {
+    if (g_player) g_player->synth_reset();
 }
 
 extern "C" void Play_Music(const char* directory, const char* fileName) {

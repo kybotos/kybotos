@@ -35,6 +35,9 @@ extern const uint8_t seq_smoke_wasm_start[] asm("_binary_seq_smoke_wasm_start");
 extern const uint8_t seq_smoke_wasm_end[]   asm("_binary_seq_smoke_wasm_end");
 extern const uint8_t sequencer_wasm_start[] asm("_binary_sequencer_wasm_start");
 extern const uint8_t sequencer_wasm_end[]   asm("_binary_sequencer_wasm_end");
+// 内蔵音源ポートの検証用(Phase 21)。回帰 6 本には入れない
+extern const uint8_t synth_probe_wasm_start[] asm("_binary_synth_probe_wasm_start");
+extern const uint8_t synth_probe_wasm_end[]   asm("_binary_synth_probe_wasm_end");
 // 検証用 MP3(hostapi_audio_* のミュージックルートへシード)
 extern const uint8_t test_mp3_start[] asm("_binary_test_mp3_start");
 extern const uint8_t test_mp3_end[]   asm("_binary_test_mp3_end");
@@ -227,6 +230,9 @@ bool launcher_prepare_sd(char* status, size_t status_len)
     // Sequencer app(Phase 18)
     snprintf(path, sizeof(path), "%s/sequencer.wasm", kAppsDir);
     seed_file(path, sequencer_wasm_start, sequencer_wasm_end);
+    // 内蔵音源ポートの検証用(Phase 21)
+    snprintf(path, sizeof(path), "%s/synth_probe.wasm", kAppsDir);
+    seed_file(path, synth_probe_wasm_start, synth_probe_wasm_end);
 
     // hostapi_audio_* のミュージックルートと検証用 MP3 (Phase 6B)
     if (stat("/sdcard/music", &st) != 0 && mkdir("/sdcard/music", 0775) != 0) {
