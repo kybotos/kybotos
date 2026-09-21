@@ -316,7 +316,91 @@ WASM の ABI ではない(両ホストのアダプタを同時に直せば済む
 
 ## ステップ 1: WAMR プールの PSRAM 化(実測とプール / heap の 4 値)
 
-(未実施)
+**実施日: 2026-09-21。結論: 承認どおり実施。悪化は見つからなかった。**
+
+### 変更
+
+`src/components/wasm_runtime/wasm_runtime.cpp` の 1 箇所だけ(コミット `ddccded`)。
+
+```
+-static uint8_t s_wamr_heap[112 * 1024];
++static constexpr size_t kWamrPoolBytes = 112 * 1024;
++static uint8_t* s_wamr_heap = nullptr;          // runtime_init() で PSRAM から取る
+```
+
+`runtime_init()` で `heap_caps_aligned_alloc(16, kWamrPoolBytes, MALLOC_CAP_SPIRAM)`。
+**取れなければ `ESP_LOGE` + `return false` で起動を止める**(0-a の決定どおり、
+internal へのフォールバックは作らない)。確保は起動時 1 回で解放しない。
+**大きさは 112KB のまま**(0-a)。**Linux ホストの 192KB 静的は触っていない**
+(x86_64 に PSRAM の概念が無く、触っても得るものが無いため)。
+
+配置はログで確認できる:
+
+```
+I (1325) WASM: WAMR pool 114688 bytes at 0x3c10b400 (PSRAM)
+```
+
+### 同一ファームでの A/B(`app_tick` の悪化の有無)
+
+**19b の `app_tick` avg 1,207µs は `.wasm` が 31,352 B だった頃の値**で、
+**Phase 20(`.wasm` 39,383 B)は `app_tick` を記録していない**。そのまま比べると
+**プール移動と `.wasm` 増加が交絡する**ので、**同一ファームで A/B を取った**
+(`PHASE21-TEMP` の目印を付けて internal の静的に戻したビルドを焼き、計測後に
+`git checkout --` で撤去。実装を先にコミットしてあるので安全 — lessons.md「作業手順」)。
+
+| 指標 | internal(A) | **PSRAM(B)** | 判定 |
+|---|---|---|---|
+| `app_tick` avg | 1,391µs | **1,387µs** | 悪化なし(−4µs、ノイズ範囲) |
+| `app_tick` p50 | 1,395 | **1,387** | 悪化なし |
+| `app_tick` p95 | 1,413 | **1,403** | 悪化なし |
+| `app_tick` p99 | 1,419 | **1,403** | 悪化なし |
+| `app_tick` max | 1,559 | **1,680** | +121µs。**ジッタ上限 5.1ms に対して十分小さい**(1 サンプルの統計) |
+| 起床間隔 | min 93,640 / max 100,001 | min 96,253 / max 100,001 | 悪化なし |
+
+**「WASM スタック 8KB もプールに載るので、読み書きの多いスタックは `.wasm` バッファ(読み出し主体)
+と性質が違う」という 0-a の懸念は、実測では現れなかった。**
+A のビルドは `free_int` **39,796** / `largest_int` **15,360** で **Phase 20 の基準値
+(39,900 / 15,360)を再現**しており、A/B が正しく効いていることの裏づけになっている。
+
+### メモリ(停止時の 4 値)
+
+| 指標 | Phase 20 | **Phase 21** | 差 |
+|---|---|---|---|
+| `free_int` | 39,900 | **154,520** | **+114,620** |
+| `largest_int` | 15,360 | **106,496** | **+91,136** |
+| `free_psram` | 8,316,904 | **8,202,204** | −114,700(プールぶん) |
+| `largest_psram` | — | 8,126,464 | — |
+
+`heap_init` のログも変わる: internal の第 1 プールが **84 KiB → 196 KiB**。
+**基準値は Phase 15(free_int 105,880 / largest_int 57,344)より上に戻った。**
+
+**プール消費は変わらない**: `highmark=101200 / total=114496 / free=13296`
+(Phase 20 は 101,384)。**0-h で「変わっていたら何かを取り違えている」と置いた指標**が
+期待どおり動かなかったので、移動が副作用を持っていないことの裏づけになる。
+
+### 回帰(V1 / V2)
+
+- **実機 6 本 ALL PASS**(`captures/phase21-regress-step1/report.md`)。
+  全行で `free_int` 差分 **+0**、反復 3 回の終了値もすべて同一、許容外の WARN/ERROR **0 件**。
+  **プールが internal から出たので、6 本すべてが同じ `free_int`(154,520)/
+  `largest_int`(106,496)になった**(従来はアプリごとに違った)。
+- **しきい値を引き上げた**(`scripts/device-regress.conf`。**従来の「基準値から 8KB ほど下」に従う**):
+  - `MIN_FREE_INT` **32,000 → 146,000**
+  - `MIN_LARGEST_INT` **8,192 → 98,304**
+  - **`MIN_FREE_PSRAM` は 8,000,000 のまま**(下記「仕様からの逸脱」)
+  - 新しい値で**もう一度 6 本を回して PASS**(`captures/phase21-regress-step1b/report.md`)
+- **Linux 6 本 ALL PASS**(`captures/phase21/regress/`)。`app started` / `app stopped` 各 1、警告 0。
+  **プール消費(highmark)は 6 本とも Phase 20 と 1 バイトも同じ**:
+  touch_demo 15,944 / mp3player 19,888 / metronome 23,864 / midi_loopback 29,120 /
+  seq_smoke 28,968 / sequencer 141,248。**Linux は 1 行も変えていないので当然だが、
+  「実機だけを触った」ことの確認になる。**
+
+### 仕様からの逸脱(ステップ 1)
+
+- **`MIN_FREE_PSRAM` を下げなかった。** 0-i の 7 で「8,000,000 → 7,900,000 程度へ下げる」と
+  書いたが、**実測 8,202,204 に対して 8,000,000 は 202KB の余裕がある**ので下げる必要が無かった。
+  **先回りしてしきい値を緩めると監視が弱くなるだけ**なので据え置く。
+  **Phase 21a でプールを増やすときに、そのとき必要な分だけ下げる**(conf にその旨を書いた)。
 
 ## ステップ 2: 内蔵音源ポート(Linux)
 
