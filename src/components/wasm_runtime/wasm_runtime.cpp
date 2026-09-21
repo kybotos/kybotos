@@ -228,6 +228,18 @@ void* app_thread(void*)
             else {
                 ESP_LOGW(TAG, "app: wasm_runtime_get_memory(0) returned NULL");
             }
+            // Phase 19a(常設): **WAMR プールの残り**を毎回ログに残す。
+            // プール不足は `create_exec_env failed` で出るが、**足りなくなる前に気づきたい**
+            // (Phase 18c と 19 で 2 回続けて天井に当たり、そのたびに一時計測を足していた)。
+            // `highmark` は最初のロードの値だけが当てになる(Phase 18 の教訓)。
+            {
+                mem_alloc_info_t mi;
+                memset(&mi, 0, sizeof(mi));
+                wasm_runtime_get_mem_alloc_info(&mi);
+                ESP_LOGI(TAG, "app: wamr pool total=%u free=%u highmark=%u",
+                         (unsigned)mi.total_size, (unsigned)mi.total_free_size,
+                         (unsigned)mi.highmark_size);
+            }
             log_heap("app: started");
         }
 

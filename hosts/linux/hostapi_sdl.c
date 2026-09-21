@@ -36,8 +36,8 @@
 #define SCREEN_H 240
 #define WINDOW_SCALE 2
 
-#define MAX_TEXT_SLOTS 16
-#define MAX_RECT_SLOTS 16
+#define MAX_TEXT_SLOTS 32 /* Phase 19a: タイル表示のため 16 → 32(実機と同値) */
+#define MAX_RECT_SLOTS 24 /* Phase 19a: 16 → 24(実機と同値) */
 #define MAX_TEXT_LEN 63
 #define EVENT_QUEUE_DEPTH 16
 
@@ -613,13 +613,27 @@ static void draw_char8x8(int32_t x, int32_t y, unsigned char c)
 
 /* Phase 18b: 実機のフォント(LVGL Montserrat + FontAwesome サブセット)にある
  * U+F04B(▶)/ U+F04D(■)は DejaVu に無い。アプリが両ホストで同じバイト列を書けるよう、
- * この 2 つだけホスト側が図形として描く。戻り値は進めた幅(px)、0 = 記号ではない */
+ * これらだけホスト側が図形として描く。戻り値は進めた幅(px)、0 = 記号ではない。
+ * Phase 19a で U+F00D(✕、タイルの削除)を追加した */
 #define SYM_W 12
 static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
 {
     int i;
     SDL_Rect r;
-    if (p[0] != 0xEF || p[1] != 0x81) return 0;
+    if (p[0] != 0xEF) return 0;
+    if (p[1] == 0x80 && p[2] == 0x8D) { /* U+F00D ✕(2 本の斜線) */
+        SDL_SetRenderDrawColor(s_renderer, (rgb888 >> 16) & 0xff, (rgb888 >> 8) & 0xff,
+                               rgb888 & 0xff, 255);
+        for (i = 0; i < 9; ++i) {
+            r.w = 2; r.h = 2;
+            r.x = x + 1 + i; r.y = y + 2 + i;
+            SDL_RenderFillRect(s_renderer, &r);
+            r.x = x + 1 + i; r.y = y + 10 - i;
+            SDL_RenderFillRect(s_renderer, &r);
+        }
+        return SYM_W;
+    }
+    if (p[1] != 0x81) return 0;
     SDL_SetRenderDrawColor(s_renderer, (rgb888 >> 16) & 0xff, (rgb888 >> 8) & 0xff,
                            rgb888 & 0xff, 255);
     if (p[2] == 0x8B) { /* U+F04B ▶(右向き三角): 左端が最も高く、右端で 1px になる */

@@ -366,6 +366,15 @@ midi_loopback による確認を伴って行う:
 | `hostapi_seq_event_t` | シーケンサイベント。16 bytes(ABI 凍結) |
 | `hostapi_position_t` | transport 位置。32 bytes(ABI 凍結) |
 | `hostapi_draw_text_rgb` | 色付きテキスト(Phase 18b。スロットは `draw_text` と共有) |
+
+**描画スロット(Phase 19a で拡張)**: `draw_text` / `draw_text_rgb` は **text 32 スロット**、
+`fill_rect` は **rect 24 スロット**(両ホスト同値。Phase 19a までは各 16)。
+**スロットは `(x, y)` で引かれ、アプリ実行中は解放されない**(アプリ停止でまとめて片付く)。
+`fill_rect` の `w` / `h` は毎回更新されるので、**`w = h = 0` で描けばそのスロットを消せる**
+(画面によって使う領域が入れ替わるときの常套手段。`docs/design/ui-conventions.md` §3.5)。
+上限に当たると `no free slot` の警告が出る。
+**記号は実機のフォント(LVGL Montserrat + FontAwesome サブセット)にある U+F04B(▶)/ U+F04D(■)/
+U+F00D(✕)を使い、DejaVu に無い Linux ホストはこれらを図形として描く。**
 | `HOSTAPI_EV_*` | 入力イベント種別(`TOUCH_DOWN` / `TOUCH_UP` / **`TOUCH_MOVE`**。Phase 18a) |
 | `HOSTAPI_TOUCH_MOVE_MIN_PX` | MOVE を配送する最小移動量(論理 px、両ホスト共通。Phase 18a) |
 | `HOSTAPI_KEY_*` / `HOSTAPI_KEY_ACTION_*` | 任意 export `app_key()` の引数(Phase 18a) |
