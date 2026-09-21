@@ -41,6 +41,11 @@ pub enum Action {
     Shuttle { dx: i32, dy: i32 },
     /// シャトルを離した(値の変更を確定する)
     ShuttleEnd,
+    /// **横スワイプ**(アプリが [`Gesture::allow_hswipe`] を立てている間だけ起きる。Phase 21a)。
+    /// **ページ送り**に使う: `dx` は押下位置からの累積移動量(右が正)だが、
+    /// **1 回の押下につき 1 度しか返らない**ので、アプリは向きだけ見ればよい。
+    /// 立てていない画面では従来どおり [`Action::Cancel`] になり、**何も起きない**
+    HSwipe { dx: i32 },
     /// **ドラッグ中**(アプリが [`Gesture::allow_drag`] を立てている間だけ起きる。Phase 19b)。
     /// `dx` / `dy` は**押下位置からの累積移動量**(右・下が正)。
     /// スワイプ(スクロール)と違って**横方向でも取り消されない**ので、要素を掴んで運べる
@@ -82,6 +87,8 @@ pub struct Gesture {
     dy: i32,
     /// 押下からのドラッグを許すか(編集モードなど。Phase 19b)
     drag_ok: bool,
+    /// 横スワイプ(ページ送り)を許すか(Phase 21a)
+    hswipe_ok: bool,
 }
 
 impl Default for Gesture {
@@ -97,7 +104,17 @@ fn elapsed(now: u32, since: u32) -> i32 {
 
 impl Gesture {
     pub const fn new() -> Gesture {
-        Gesture { state: State::Idle, x: 0, y: 0, t: 0, tap_ok: true, dx: 0, dy: 0, drag_ok: false }
+        Gesture {
+            state: State::Idle,
+            x: 0,
+            y: 0,
+            t: 0,
+            tap_ok: true,
+            dx: 0,
+            dy: 0,
+            drag_ok: false,
+            hswipe_ok: false,
+        }
     }
 
     /// 長押しが成立していて、まだ離していないか(点滅させるかの判断に使う)
@@ -117,6 +134,13 @@ impl Gesture {
     /// **false のときの判定は一切変わらない**(既存アプリは影響を受けない)
     pub fn allow_drag(&mut self, allow: bool) {
         self.drag_ok = allow;
+    }
+
+    /// **横スワイプ(ページ送り)を許すか**(Phase 21a)。アプリが必要な画面でだけ立てる。
+    /// **false のときの判定は一切変わらない**(既存アプリは影響を受けない)。
+    /// 縦が優先という既存規則も変わらない(`dy` のほうが大きければ縦スワイプになる)
+    pub fn allow_hswipe(&mut self, allow: bool) {
+        self.hswipe_ok = allow;
     }
 
     /// 要素を掴んで運んでいる最中か
@@ -195,10 +219,16 @@ impl Gesture {
                     self.tap_ok = false;
                     Action::Scroll { dy }
                 } else if dx.abs() >= SWIPE_MIN_MOVE {
-                    // 横スワイプは v1 では使わない。ただしタップ / 長押しは取り消す
+                    // 横スワイプ。**許している画面だけ**ページ送りとして 1 度だけ返す
+                    // (Phase 21a)。許していなければ従来どおり、タップ / 長押しを
+                    // 取り消して何も起こさない
                     self.state = State::Dead;
                     self.tap_ok = false;
-                    Action::Cancel
+                    if self.hswipe_ok {
+                        Action::HSwipe { dx }
+                    } else {
+                        Action::Cancel
+                    }
                 } else if dx.abs() > TAP_MAX_MOVE || dy.abs() > TAP_MAX_MOVE {
                     // デッドゾーン(タップには大きすぎ、スワイプには足りない)。
                     // **ここで押下を終わらせない**。MOVE は刻んで届くので、
@@ -481,4 +511,58 @@ mod tests {
         g.on_event(EV_TOUCH_DOWN, 50, 60, 0);
         assert_eq!(g.on_event(EV_TOUCH_UP, 50, 60, 100), Action::Tap { x: 50, y: 60 });
     }
+
+    // ---- 横スワイプ(Phase 21a)----
+
+    #[test]
+    fn horizontal_swipe_is_ignored_by_default() {
+        // **既存アプリの挙動が変わらないこと**が本 crate の約束
+        let mut g = Gesture::new();
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 140, 100, 50), Action::Cancel);
+        assert_eq!(g.on_event(EV_TOUCH_UP, 140, 100, 100), Action::None);
+    }
+
+    #[test]
+    fn horizontal_swipe_fires_once_when_allowed() {
+        let mut g = Gesture::new();
+        g.allow_hswipe(true);
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 140, 100, 50), Action::HSwipe { dx: 40 });
+        // 押下 1 回につき 1 度だけ(そのあとは何も起きない = ページが飛び続けない)
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 180, 100, 60), Action::None);
+        assert_eq!(g.on_event(EV_TOUCH_UP, 180, 100, 100), Action::None);
+    }
+
+    #[test]
+    fn horizontal_swipe_reports_its_direction() {
+        let mut g = Gesture::new();
+        g.allow_hswipe(true);
+        g.on_event(EV_TOUCH_DOWN, 200, 100, 0);
+        match g.on_event(EV_TOUCH_MOVE, 160, 100, 50) {
+            Action::HSwipe { dx } => assert!(dx < 0),
+            a => panic!("expected HSwipe, got {a:?}"),
+        }
+    }
+
+    #[test]
+    fn vertical_still_wins_over_horizontal() {
+        // 縦優先という既存規則は変わらない
+        let mut g = Gesture::new();
+        g.allow_hswipe(true);
+        g.on_event(EV_TOUCH_DOWN, 100, 100, 0);
+        assert_eq!(g.on_event(EV_TOUCH_MOVE, 130, 140, 50), Action::Scroll { dy: 40 });
+    }
+
+    #[test]
+    fn horizontal_swipe_does_not_break_tap_or_long_press() {
+        let mut g = Gesture::new();
+        g.allow_hswipe(true);
+        g.on_event(EV_TOUCH_DOWN, 50, 60, 0);
+        assert_eq!(g.on_event(EV_TOUCH_UP, 50, 60, 100), Action::Tap { x: 50, y: 60 });
+        g.on_event(EV_TOUCH_DOWN, 50, 60, 200);
+        assert_eq!(g.tick(200 + LONG_PRESS_MS), Action::LongPressArmed { x: 50, y: 60 });
+        assert_eq!(g.on_event(EV_TOUCH_UP, 50, 60, 900), Action::LongPressFired { x: 50, y: 60 });
+    }
+
 }
