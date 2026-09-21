@@ -6,5 +6,6 @@ src/sdkconfig.old
 src/sdkconfig
 wasm-apps/*/target/
 hosts/linux/build/
+hosts/linux/sdcard/
 captures/
 tools/midi_clock_probe/build/

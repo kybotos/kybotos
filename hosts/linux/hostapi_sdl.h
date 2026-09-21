@@ -58,6 +58,10 @@ void native_hostapi_audio_set_volume(wasm_exec_env_t exec_env, int32_t v);
 int32_t native_hostapi_audio_get_state(wasm_exec_env_t exec_env);
 int32_t native_hostapi_fs_list(wasm_exec_env_t exec_env, int32_t idx,
                                char* buf, uint32_t buf_len);
+int32_t native_hostapi_fs_read(wasm_exec_env_t exec_env, const char* path, uint32_t path_len,
+                               char* buf, uint32_t buf_len);
+int32_t native_hostapi_fs_write(wasm_exec_env_t exec_env, const char* path, uint32_t path_len,
+                                const char* buf, uint32_t buf_len);
 int32_t native_hostapi_tone_define(wasm_exec_env_t exec_env, int32_t slot,
                                    int32_t wave, int32_t freq_hz, int32_t dur_ms,
                                    int32_t level);

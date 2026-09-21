@@ -237,6 +237,11 @@ bool launcher_prepare_sd(char* status, size_t status_len)
         seed_file("/sdcard/music/tune_duo.mp3", tune_duo_mp3_start, tune_duo_mp3_end);
     }
 
+    // Bank の保存先 (Phase 20)。hostapi_fs_read / fs_write のデータルート
+    if (stat("/sdcard/data", &st) != 0 && mkdir("/sdcard/data", 0775) != 0) {
+        ESP_LOGW(TAG, "cannot create /sdcard/data");
+    }
+
     snprintf(status, status_len, "SD ready");
     return true;
 }

@@ -18,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 
@@ -574,6 +575,91 @@ int32_t native_hostapi_poll_event(wasm_exec_env_t exec_env, char* buf, uint32_t 
     }
     portEXIT_CRITICAL(&s_evq_mux);
     return n;
+}
+
+// ---- ファイル読み書き (Phase 20) ----
+// データルート直下の**フラットな名前だけ**を許す(サンドボックス境界)。
+// Linux ホスト (hosts/linux/hostapi_sdl.c) と同じ契約。
+constexpr const char* kDataRoot = "/sdcard/data";
+constexpr uint32_t kMaxDataPathLen = 63;
+
+bool data_path_ok(const char* path, uint32_t len)
+{
+    if (len == 0 || len > kMaxDataPathLen) return false;
+    if (path[0] == '.') return false; // "." / ".." / 隠しファイル
+    for (uint32_t i = 0; i < len; i++) {
+        const char c = path[i];
+        if (c == '/' || c == '\\' || c == '\0') return false;
+        if (c == '.' && i + 1 < len && path[i + 1] == '.') return false;
+    }
+    return true;
+}
+
+// rel(NUL 終端なし)を kDataRoot 直下の絶対パスにする。不正なら false
+bool data_full_path(const char* path, uint32_t len, char* out, size_t out_len, const char* suffix)
+{
+    if (!data_path_ok(path, len)) return false;
+    char rel[kMaxDataPathLen + 1];
+    memcpy(rel, path, len);
+    rel[len] = '\0';
+    const int n = snprintf(out, out_len, "%s/%s%s", kDataRoot, rel, suffix);
+    return n > 0 && (size_t)n < out_len;
+}
+
+int32_t native_hostapi_fs_read(wasm_exec_env_t exec_env, const char* path, uint32_t path_len,
+                               char* buf, uint32_t buf_len)
+{
+    (void)exec_env;
+    char full[96];
+    if (!data_full_path(path, path_len, full, sizeof(full), "")) {
+        ESP_LOGW(TAG, "fs_read: rejected path");
+        return -1;
+    }
+    FILE* f = fopen(full, "rb");
+    if (!f) return -1; // 無いのは正常系(空きスロット)なので警告しない
+    const size_t n = (buf_len > 0) ? fread(buf, 1, buf_len, f) : 0;
+    const bool bad = ferror(f) != 0;
+    fclose(f);
+    if (bad) {
+        ESP_LOGW(TAG, "fs_read: %s failed", full);
+        return -1;
+    }
+    return (int32_t)n; // ファイルが buf_len より大きくても切り詰めて成功
+}
+
+int32_t native_hostapi_fs_write(wasm_exec_env_t exec_env, const char* path, uint32_t path_len,
+                                const char* buf, uint32_t buf_len)
+{
+    (void)exec_env;
+    char full[96];
+    char tmp[96];
+    if (!data_full_path(path, path_len, full, sizeof(full), "") ||
+        !data_full_path(path, path_len, tmp, sizeof(tmp), ".tmp")) {
+        ESP_LOGW(TAG, "fs_write: rejected path");
+        return -1;
+    }
+    FILE* f = fopen(tmp, "wb");
+    if (!f) {
+        ESP_LOGW(TAG, "fs_write: cannot open %s", tmp);
+        return -1;
+    }
+    const size_t n = (buf_len > 0) ? fwrite(buf, 1, buf_len, f) : 0;
+    const int closed = fclose(f);
+    if (n != buf_len || closed != 0) {
+        ESP_LOGW(TAG, "fs_write: %s failed (%u/%u)", tmp, (unsigned)n, (unsigned)buf_len);
+        remove(tmp);
+        return -1;
+    }
+    // FATFS の rename は宛先が在ると失敗するので先に消す。ここで電源が落ちても
+    // 完全な内容は .tmp に残る(手で復旧できる)
+    remove(full);
+    if (rename(tmp, full) != 0) {
+        ESP_LOGW(TAG, "fs_write: rename failed: %s", full);
+        remove(tmp);
+        return -1;
+    }
+    ESP_LOGI(TAG, "fs_write: %s (%u bytes)", full, (unsigned)buf_len);
+    return 0;
 }
 
 // 登録テーブルは shared/hostapi_defs.h の X-macro から生成(Linux ホストと共通)

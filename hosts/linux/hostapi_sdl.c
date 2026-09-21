@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <errno.h>
 #include <sys/stat.h>
 
 #ifdef HAVE_SDL_TTF
@@ -425,6 +426,109 @@ int32_t native_hostapi_fs_list(wasm_exec_env_t exec_env, int32_t idx,
     return found;
 }
 
+/* ---- ファイル読み書き (Phase 20) ----
+ * 実機側 hostapi.cpp と同じ契約: DATA_ROOT 直下の**フラットな名前だけ**を許し、
+ * 書き込みは一時ファイル + rename。ルートはホストが起動時に作る。 */
+#define DATA_ROOT "./sdcard/data"
+#define MAX_DATA_PATH_LEN 63
+
+static void ensure_data_root(void)
+{
+    /* 親 → 子の順に作る(既に在れば EEXIST で無視) */
+    if (mkdir("./sdcard", 0775) != 0 && errno != EEXIST) {
+        fprintf(stderr, "cannot create ./sdcard: %s\n", strerror(errno));
+    }
+    if (mkdir(DATA_ROOT, 0775) != 0 && errno != EEXIST) {
+        fprintf(stderr, "cannot create %s: %s\n", DATA_ROOT, strerror(errno));
+    }
+}
+
+static bool data_path_ok(const char* path, uint32_t len)
+{
+    uint32_t i;
+    if (len == 0 || len > MAX_DATA_PATH_LEN) return false;
+    if (path[0] == '.') return false; /* "." / ".." / 隠しファイル */
+    for (i = 0; i < len; i++) {
+        const char c = path[i];
+        if (c == '/' || c == '\\' || c == '\0') return false;
+        if (c == '.' && i + 1 < len && path[i + 1] == '.') return false;
+    }
+    return true;
+}
+
+/* rel(NUL 終端なし)を DATA_ROOT 直下のパスにする。不正なら false */
+static bool data_full_path(const char* path, uint32_t len, char* out, size_t out_len,
+                           const char* suffix)
+{
+    char rel[MAX_DATA_PATH_LEN + 1];
+    int n;
+    if (!data_path_ok(path, len)) return false;
+    memcpy(rel, path, len);
+    rel[len] = '\0';
+    n = snprintf(out, out_len, "%s/%s%s", DATA_ROOT, rel, suffix);
+    return n > 0 && (size_t)n < out_len;
+}
+
+int32_t native_hostapi_fs_read(wasm_exec_env_t exec_env, const char* path, uint32_t path_len,
+                               char* buf, uint32_t buf_len)
+{
+    char full[256];
+    size_t n;
+    bool bad;
+    FILE* f;
+    (void)exec_env;
+    if (!data_full_path(path, path_len, full, sizeof(full), "")) {
+        fprintf(stderr, "fs_read: rejected path\n");
+        return -1;
+    }
+    f = fopen(full, "rb");
+    if (!f) return -1; /* 無いのは正常系(空きスロット) */
+    n = (buf_len > 0) ? fread(buf, 1, buf_len, f) : 0;
+    bad = ferror(f) != 0;
+    fclose(f);
+    if (bad) {
+        fprintf(stderr, "fs_read: %s failed\n", full);
+        return -1;
+    }
+    return (int32_t)n; /* ファイルが buf_len より大きくても切り詰めて成功 */
+}
+
+int32_t native_hostapi_fs_write(wasm_exec_env_t exec_env, const char* path, uint32_t path_len,
+                                const char* buf, uint32_t buf_len)
+{
+    char full[256];
+    char tmp[256];
+    size_t n;
+    int closed;
+    FILE* f;
+    (void)exec_env;
+    if (!data_full_path(path, path_len, full, sizeof(full), "") ||
+        !data_full_path(path, path_len, tmp, sizeof(tmp), ".tmp")) {
+        fprintf(stderr, "fs_write: rejected path\n");
+        return -1;
+    }
+    f = fopen(tmp, "wb");
+    if (!f) {
+        fprintf(stderr, "fs_write: cannot open %s\n", tmp);
+        return -1;
+    }
+    n = (buf_len > 0) ? fwrite(buf, 1, buf_len, f) : 0;
+    closed = fclose(f);
+    if (n != buf_len || closed != 0) {
+        fprintf(stderr, "fs_write: %s failed (%zu/%u)\n", tmp, n, (unsigned)buf_len);
+        remove(tmp);
+        return -1;
+    }
+    /* 実機(FATFS)に合わせて宛先を先に消してから rename する */
+    remove(full);
+    if (rename(tmp, full) != 0) {
+        fprintf(stderr, "fs_write: rename failed: %s\n", full);
+        remove(tmp);
+        return -1;
+    }
+    return 0;
+}
+
 /* ---- 入力イベントキュー (Phase 6A) ----
  * 実機と同じ規約: 深さ 16、満杯は最古から捨てる、DOWN 未配送の UP は捨てる。
  * Linux は main ループ単一スレッドなのでロック不要。 */
@@ -517,6 +621,7 @@ void host_sdl_push_touch_move(int x, int y)
 
 bool host_sdl_init(void)
 {
+    ensure_data_root(); /* Phase 20: 保存先を作っておく */
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return false;

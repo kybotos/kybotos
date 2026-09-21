@@ -113,6 +113,22 @@
  *     列挙から除外。列挙順はホスト依存だが同一セッション中は安定。
  *     返る名前はそのまま hostapi_audio_play に渡せる。
  *
+ *   hostapi_fs_read(path_ptr, path_len, buf_ptr, buf_len) -> n   (Phase 20)
+ *     データルート直下の path を**先頭から最大 buf_len バイト**読み、読めた
+ *     バイト数を返す。ファイルが無い / パスが不正 / 読めないときは -1。
+ *     **ファイルが buf_len より大きくても切り詰めて成功する**(ヘッダだけ
+ *     読んで一覧を作る用途のため)。
+ *   hostapi_fs_write(path_ptr, path_len, buf_ptr, buf_len) -> 0/-1  (Phase 20)
+ *     buf_len バイトを path へ全部書く。**一時ファイル(<path>.tmp)へ書いてから
+ *     rename する**ので、途中で電源が落ちても既存のファイルは壊れない。
+ *
+ *     データルートは実機 /sdcard/data、Linux ./sdcard/data(ホストが起動時に作る)。
+ *     **アプリが指せるのはその直下のフラットな名前だけ**で、path は
+ *     長さ 1..63 / '/' を含まない / ".." を含まない / 先頭が '.' でないこと
+ *     (満たさなければ -1)。アプリごとのサブディレクトリには分けていない
+ *     (将来分けるときはホスト側でプレフィックスを付ければ ABI は変わらない)。
+ *     ホストは中身を解釈しない(拡張子も問わない)。
+ *
  * ============================== misc ==============================
  *
  *   hostapi_play_click()   クリック音(短い減衰サイン)を即時再生。
@@ -366,6 +382,9 @@ enum {
     X(hostapi_audio_get_state, "()i")     \
     /* fs */                              \
     X(hostapi_fs_list, "(i*~)i")          \
+    /* fs read/write (Phase 20) */      \
+    X(hostapi_fs_read, "(*~*~)i")         \
+    X(hostapi_fs_write, "(*~*~)i")        \
     /* misc / tone */                     \
     X(hostapi_play_click, "()")           \
     X(hostapi_now_ms, "()i")              \
