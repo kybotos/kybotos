@@ -159,6 +159,7 @@ namespace {
 
 constexpr int kMixRate = 44100;
 constexpr int kMixBlock = 240; // I2S_CHANNEL_DEFAULT_CONFIG の dma_frame_num と同じ
+constexpr int kRingBlocks = 6; // 同 dma_desc_num。リング 1 周ぶん
 
 enum VoiceKind : uint8_t { VK_IDLE = 0, VK_TONE, VK_KICK, VK_SNARE, VK_HAT, VK_CRASH };
 
@@ -372,6 +373,26 @@ void Mp3Player::ensure_click_task() noexcept {
     }
 }
 
+// 鳴っている音を止め、**DMA リング 1 周ぶんの無音を書いてから**戻る。
+// `i2s_channel_write` はディスクリプタが空くまで待つので、これが戻った時点で
+// 「前の音は鳴り終わり、リングは無音で満たされている」ことが保証される。
+//
+// MP3 との受け渡しはここを通す:
+//   - ミキサ → MP3: 鳴っているドラムが**ぶつ切りにならない**(クラッシュの最中に
+//     MP3 が始まると、切断のクリックが「ピッ」として聞こえる。Phase 21 で踏んだ)
+//   - MP3 → ミキサ: **再構成の前に**残りを押し出すので、古いサンプルが
+//     新しいレートで鳴ることがない
+void Mp3Player::flush_silence() noexcept
+{
+    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) s_voices[i].kind = VK_IDLE;
+    if (tone_queue_) xQueueReset(tone_queue_);
+    if (!tx_ || !enabled_) return;
+    memset(s_chunk, 0, sizeof(s_chunk));
+    for (int i = 0; i < kRingBlocks + 1; i++) {
+        if (!i2s_write(s_chunk, sizeof(s_chunk), 100)) break;
+    }
+}
+
 // ミキサ本体。**常時 1 ブロックを書き続ける**ので i2s_channel_write が
 // このループのペースを作る(タイマは要らない)。
 void Mp3Player::click_task_loop() noexcept {
@@ -379,14 +400,22 @@ void Mp3Player::click_task_loop() noexcept {
         // MP3 が鳴っている間は書かない(同じ I2S を audio_player が使う)。
         // 溜まった発音要求は捨てる(契約どおり)。
         const bool busy = mp3_active_.load();
-        if (busy != s_mixer_suspended) {
-            s_mixer_suspended = busy;
-            ESP_LOGI(TAG, "mixer %s", busy ? "suspended (mp3)" : "resumed");
-        }
         if (busy) {
+            if (!s_mixer_suspended) {
+                s_mixer_suspended = true;
+                ESP_LOGI(TAG, "mixer suspended (mp3)");
+                flush_silence();      // 鳴っている音を無音まで送り切ってから譲る
+                mixer_idle_.store(true); // play_file はこれを待つ
+            }
             xQueueReset(tone_queue_);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
+        }
+        if (s_mixer_suspended) {
+            s_mixer_suspended = false;
+            mixer_idle_.store(false);
+            ESP_LOGI(TAG, "mixer resumed");
+            flush_silence();          // **再構成の前に** MP3 の残りを押し出す
         }
         if (!tx_) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
         // MP3 が 22.05kHz 等へ変えたままなら 44.1kHz へ戻す。
@@ -579,7 +608,11 @@ bool Mp3Player::play_file(const std::string& path) noexcept {
     current_path_ = path;
     finished_.store(false);
     Music_Next_Flag = false;
-    mp3_active_.store(true); // ここから I2S は MP3 のもの (Phase 21)
+    // ここから I2S は MP3 のもの (Phase 21)。**ミキサが無音でリングを満たすまで待つ**
+    // (最大 100ms)。待たないと、鳴っているドラムが切られて「ピッ」と鳴る。
+    mixer_idle_.store(false);
+    mp3_active_.store(true);
+    for (int i = 0; i < 20 && !mixer_idle_.load(); i++) vTaskDelay(pdMS_TO_TICKS(5));
     
 #if HAVE_ESP_AUDIO_PLAYER
     expected_event_ = AUDIO_PLAYER_CALLBACK_EVENT_PLAYING;

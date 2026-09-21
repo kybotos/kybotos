@@ -85,6 +85,9 @@ private:
     bool i2s_write(void* data, size_t len, uint32_t timeout_ms, size_t* written = nullptr) noexcept;
     void ensure_click_task() noexcept;   // Phase 21: ミキサタスク
     void click_task_loop() noexcept;     // Phase 21: ブロックミキサ本体
+    // Phase 21: 鳴っている音を止め、DMA リングを無音で満たしてから抜ける。
+    // MP3 との受け渡しの両方向で「前の音がぶつ切りにならない」ことを保証する。
+    void flush_silence() noexcept;
 #if HAVE_ESP_AUDIO_PLAYER
     static esp_err_t write_fn(void* audio_buffer, size_t len, size_t* bytes_written, uint32_t timeout_ms);
     static esp_err_t clk_set_fn(uint32_t rate, uint32_t bits_cfg, i2s_slot_mode_t ch);
@@ -107,6 +110,9 @@ private:
     // stop() が pause() を経由すると PAUSE のまま IDLE に戻らないため
     // (IDLE への遷移は「state==PLAYING かつキューが空」のときだけ)。
     std::atomic<bool> mp3_active_{false};
+    // ミキサが無音でリングを満たし終えたか (Phase 21)。play_file はこれを待ってから
+    // 実際の再生に入るので、**ドラムが途中で切られない**。
+    std::atomic<bool> mixer_idle_{false};
 
     // Current i2s format
     uint32_t cur_rate_ = 44100;
