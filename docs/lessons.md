@@ -7,7 +7,7 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
 ## メモリ(ESP32)
 - 大きな静的バッファを足したら free heap に加え `largest_free_block` を必ず確認(5A, 6B, 7B-fix)。
 - ヒープからの恒久確保(タスク等)は最大連続ブロックを分断する。恒久物は静的確保に(7B-fix)。
-- WAMR プールは現在 **48KB**(実測消費 ~27.5KB)。Linux も parity で 48KB を維持(7B-fix)。
+- WAMR プールは **112KB で PSRAM 上**(Phase 21)。実機の消費は sequencer で ~101KB。Linux は静的 192KB のまま(x86_64 に PSRAM の概念が無いため parity にしない)。
 - FATFS は sector 512 + max_files 4(6B。sector 4096 は連続ヒープ ~38KB を要求し WAMR と衝突)。
 - WAMR プール(s_wamr_heap、native 側の固定 BSS)とは別に、native 側の
   一般ヒープ(FreeRTOS ヒープ)も WASM の linear memory 確保に影響しうる。
@@ -165,6 +165,45 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
   パターン(`=n` を探す)が一致せず、値が意図せず残ったまま次のビルドに使われた
   実績がある。**復旧確認は必ずビルド成果物側**(`build/config/sdkconfig.h` の
   `#define` 行)で行うこと(15 ステップ4)。
+
+## WAMR プールと内蔵音源(Phase 21)
+
+- **WAMR プールは PSRAM に置ける。** internal 固定にしていた理由(7B-fix: 最大連続ブロックを
+  linear memory のために残す)は **Phase 15 の PSRAM 化で既に失効していた**。
+  `heap_caps_aligned_alloc(16, …, MALLOC_CAP_SPIRAM)` に変えるだけで **internal が 112KB 戻る**
+  (停止時 `free_int` 39,900 → 154,520 / `largest_int` 15,360 → 106,496)。
+  **WASM スタック 8KB もプールに載るが、`app_tick` は悪化しなかった**(avg 1,391 → 1,387µs)(21)。
+- **メモリや速度の A/B は同一ファームで取る。** 19b の `app_tick` 1,207µs は `.wasm` 31,352 B の値で、
+  Phase 20 以降(39,383 B)と比べると**プール移動と `.wasm` 増加が交絡する**。
+  目印コメント付きで元の実装に戻したビルドを焼いて測るのが確実(21)。
+- **しきい値は上がることもある。** `device-regress.conf` の `MIN_FREE_INT` / `MIN_LARGEST_INT` は
+  18c 以降ずっと下がり続けていたが、21 で初めて上げた。**先回りして緩めない**
+  (`MIN_FREE_PSRAM` は余裕 202KB あったので据え置いた)(21)。
+- **常時書き込むミキサにすると、7B-fix の DMA ゼロ埋めは不要になる。** 二重クリックの真因は
+  **クリック終端のアンダーフロー**で `auto_clear` とプリフェッチが競合することなので、
+  **書き続けていればアンダーフロー自体が起きない**。Linux が pull 型で再現しなかったことが
+  当時から記録されていた(21)。
+- **`i2s_channel_disable()` は DMA バッファの中身を消さない**(`curr_ptr` / `rw_pos` /
+  `msg_queue` を戻すだけ)。そのまま `enable` すると**前のサンプルが新しいレートで鳴る**。
+  22.05kHz モノ → 44.1kHz ステレオなら **4 倍速 32.6ms の「ピッ」**になる(21)。
+- **`i2s_channel_preload_data()` は 1 ディスクリプタしか埋められない。** 実装が
+  **`msg_queue` から次のディスクリプタを取る**のに、**直前の `i2s_channel_disable` が
+  そのキューをリセットしている**ため。**preload に期待しないこと**(21)。
+- **`audio_player_get_state()` は停止後に `PAUSE` のまま戻らない。** IDLE への遷移は
+  「`state == PLAYING` かつキューが空」のときだけで、`stop()` が `pause()` を経由すると
+  そこへ到達しない。**ホスト側の占有フラグは自分で持つこと**(21)。
+- **オーディオ経路の受け渡しは無音を経由する。** 鳴っている最中に I2S を奪うと
+  **ぶつ切りのクリック**になる。譲る側が「ボイスを消す → DMA リング 1 周ぶんの無音を書き切る」
+  までやってから譲ると、`i2s_channel_write` がディスクリプタの空きを待つ性質で
+  **前の音が鳴り終わったことまで保証できる**(21)。
+- **無音のまま黙って止まる経路は必ずログを出す。** `reconfig_rate` が失敗して
+  チャネルが無効のまま固定された不具合は、**ログに 1 行も出ず**再起動するまで音が出なかった。
+  失敗時の WARN と「次のループで作り直す」自己修復をセットで入れる(21)。
+- **`transport_start` は L0 のキューを空にする。** 開始前に積んだイベントは消える
+  (Phase 16 の教訓だが、`synth_probe` で踏み直した)(16 / 21)。
+- **室内マイクの録音では 10ms 級の事象を判定できない。** 25ms ビンで 1 ビン以下、
+  5ms へ落としても MP3 のフェードインに埋もれる。**Linux ホストの WAV 書き出し
+  (`MIDIBOX_WAV_OUT`)で機械判定し、実機は耳で確かめる**のが現実的(21)。
 
 ## Sequencer コア(Phase 16)
 - **`Option<T>` の None は全ビット 0 とは限らない。** T の中に niche(`Option<TimeSig>` のタグの

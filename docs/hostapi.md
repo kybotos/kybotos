@@ -228,6 +228,35 @@ HOSTAPI_SEQ_OP_STOP(seq_write の status に指定する。Phase 17)
   - 判断の記録は docs/architecture.md §11-10。
 ```
 
+### SYNTH ポート(内蔵音源。Phase 21)
+
+**Host API の関数は増えていない。** アプリは `seq_write` に `port = HOSTAPI_PORT_SYNTH` の
+イベントを積むだけでよい(`architecture.md` §7 のポート抽象の趣旨。
+**「この API 語彙は要件を通しても増えない」という §0 の検証観点をもう 1 件満たした**)。
+
+```
+{ tick: T, port: HOSTAPI_PORT_SYNTH, status: 0x99, data1: note, data2: velocity }
+```
+
+| 項目 | 契約 |
+|---|---|
+| 見るイベント | **Note On(`0x9n`)で `velocity > 0` のものだけ** |
+| **Note Off / velocity 0 の Note On** | **無視する。** 打楽器はワンショットなので鳴りっぱなしにならない。**パターン 1 小節あたりのイベント数が半分になる** |
+| チャンネル(`0x9n` の `n`) | **無視する。** ポートが既に宛先を決めているので二重指定になる |
+| note 番号 | **GM ドラム準拠。** v1 は **36 Kick / 38 Snare / 42 Closed HH / 49 Crash**。**未知の番号は何もしない**(ログも出さない — L0 のディスパッチャから呼ばれるため) |
+| velocity | 1..127 をゲインへ線形に写す。マスター音量と乗算(CLICK と同じ) |
+| 同時発音数 | **`HOSTAPI_SYNTH_VOICES` = 8** |
+| 溢れたとき | **同じ note の最も古いボイスを奪う。無ければ全体で最も古いもの**を奪う |
+| `transport_stop` / アプリ破棄 | 鳴っているボイスを消す(`seqcore_reset` と同じ) |
+| 音色 | **合成**(ノイズ + 減衰サイン)。**音色を定義する API は持たない**(将来サンプル再生へ差し替えてもこの契約は変えない) |
+| MP3 再生中 | **鳴らない。** 実機は同じ I2S を `esp_audio_player` が使うため排他(発音要求は捨てられる) |
+| 発音タイミング | L0 は `FIRE_ADVANCE_US = 20µs` 前にしか発火しないので、ホストのミキサは **次に書くブロックの先頭**に丸める(実機 5.44ms / Linux 5.8ms)。**従来のクリック(実機 0〜5.4ms / Linux 0〜23ms)より悪くならない。** サンプル精度にするにはポート別の先行時間が要る(`docs/results/phase21.md` 0-c の案 B、未実施) |
+
+ホスト内部では `seqcore_hooks_t` に **`synth(note, velocity, at_host_us)`** を足してある
+(`at_host_us` は案 B へ移るときのための引数で、現状のホストは使っていない)。
+**`hostapi_seq_event_t` も `HOSTAPI_NATIVE_SYMBOLS` も変えていないので、既存アプリの
+`.wasm` は再ビルド不要。**
+
 ### 実装メモ(承認後の Phase 11 向け)
 
 - L0 キュー: 静的 BSS 4KB = 256 件。tick 昇順の挿入ソート配列を推奨
@@ -333,7 +362,7 @@ HOSTAPI_SEQ_OP_STOP(seq_write の status に指定する。Phase 17)
 | `hostapi_tone_schedule` | **削除済み**(Phase 14) | 同上 |
 | `hostapi_tone_define` / `hostapi_tone_play` | **残す** | トーンパレットの定義・即時発音は L0 の CLICK port が使う。予約だけが seq に移る |
 | `hostapi_now_ms` | **残す** | UI 用の実時間。音楽時間軸とは別系統 |
-| audio | **変更なし** | 本改訂の対象外 |
+| audio | **Phase 21 で内部構造を作り替えた**(語彙は不変)。実機は「1 音を書き切る直列再生」から**常時 1 ブロックを書くミキサ**になり、**同時発音ができる**ようになった。`hostapi_tone_define` / `tone_play` / CLICK ポートの**意味は変えていない**(ミキサのボイス 1 本に載せ替えただけ)ので既存アプリは不変。副次的に**クリックとドラムが重なっても両方鳴る**。7B-fix の DMA ゼロ埋めは、常時書き込みでアンダーフローが起きなくなったため撤去した | 内蔵音源ポート(§5)のため。詳細は `docs/results/phase21.md` |
 | fs | **Phase 20 で 2 つ追加**(非破壊): `hostapi_fs_read(path, path_len, buf, buf_len) -> n`(**先頭から最大 `buf_len` バイト**読み、読めたバイト数を返す。無い / 不正なら -1。**ファイルが大きくても切り詰めて成功**する)と `hostapi_fs_write(path, path_len, buf, buf_len) -> 0/-1`(**一時ファイル + rename**)。既存の `hostapi_fs_list`(`/sdcard/music` の `.mp3` 列挙)は不変 | Bank(装置全体の Session と Song)を SD カードへ保存 / 読み込みするため(spec §6 の H7)。**データルートは実機 `/sdcard/data` / Linux `./sdcard/data`** で、**アプリが指せるのはその直下のフラットな名前だけ**(長さ 1..63 / `/` と `\` を含まない / `..` を含まない / 先頭が `.` でない。満たさなければ -1)。ディレクトリはホストが起動時に作り、**アプリからは作れない**。ホストは中身を解釈しない(拡張子も問わない)。**アプリごとのサブディレクトリには分けていない**(将来分けるときはホスト側でプレフィックスを付ければ ABI は変わらない)。**FATFS の `rename` は宛先が在ると失敗する**ので `remove` → `rename` の順で行う(Linux 側も同じ順にそろえた)。書き込み中の電源断では既存ファイルは無事だが、`remove` と `rename` の間で落ちると**完全な内容が `.tmp` として残る**。契約の原本は `shared/hostapi_defs.h`、ファイル形式(`MBBK` v1)は `wasm-apps/seqcore/src/serial.rs` と `docs/results/phase20.md` |
 | gfx | **Phase 18b で 1 つ追加**(非破壊): `hostapi_draw_text_rgb(x, y, str, len, rgb888)`。**同じ (x,y) は `hostapi_draw_text` と同じスロット**を共有し、色だけの変更でもスロットを増やさない | 状態を文字色で示すため(トグルの ON/OFF など。`docs/design/ui-conventions.md`)。既存 `hostapi_draw_text` は不変なので既存 `.wasm` は再ビルド不要。**記号 ▶ / ■ は実機のフォントにある U+F04B / U+F04D を使い、DejaVu に無い Linux ホストはこの 2 つを図形として描く** |
 | input | **Phase 18a で 2 点追加**(いずれも非破壊): `HOSTAPI_EV_TOUCH_MOVE`(押下中の移動。8px 間引き + 末尾 MOVE の畳み込みでキューを溢れさせない)と、任意 export **`app_key(key_id, action) -> i32`**(ハードウェアキー。戻り値 0 = ホストの既定動作 = アプリ停止) | スワイプ操作と「HW キーで 1 階層戻る / 最上位でアプリ終了」のため。**`app_key` を export しないアプリの挙動は従来どおり**(キー短押しで即終了)なので、既存 `.wasm` は再ビルド不要。契約の原本は `shared/hostapi_defs.h`、操作規約は `docs/design/ui-conventions.md`、決定記録は `docs/architecture.md` §11-11 |
