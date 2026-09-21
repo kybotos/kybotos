@@ -59,6 +59,15 @@ typedef struct {
     void (*send_midi)(const uint8_t* bytes, size_t len);
     /* CLICK ポートの発音(トーンパレットのスロット) */
     void (*click)(uint32_t slot);
+    /* SYNTH ポートの発音(内蔵音源。Phase 21)。
+     *   note      = MIDI ノート番号(GM ドラム準拠。未知の番号は音源側が黙って捨てる)
+     *   velocity  = 1..127
+     *   at_host_us = そのイベントが鳴るべき時刻(now_us と同じ音楽時間軸)。
+     *                ホストがブロック内のサンプルオフセットに置けるように渡す。
+     *                先行時間が無い(FIRE_ADVANCE_US = 20µs)ので、現状の実装は
+     *                「次に書くブロックの先頭」に丸めてよい(docs/results/phase21.md 0-c の案 A)。
+     * ロックの外から呼ばれる。ログ・確保・ブロッキングは禁止 */
+    void (*synth)(uint8_t note, uint8_t velocity, int64_t at_host_us);
 } seqcore_hooks_t;
 
 /* 起動時に 1 回。hooks は静的寿命であること */

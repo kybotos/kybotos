@@ -318,8 +318,48 @@ enum {
 enum {
     HOSTAPI_PORT_DIN_OUT  = 0, /* 物理 MIDI OUT (UART1) */
     HOSTAPI_PORT_USB_MIDI = 1, /* 将来 */
-    HOSTAPI_PORT_SYNTH    = 2, /* 内蔵音源(将来) */
+    HOSTAPI_PORT_SYNTH    = 2, /* 内蔵音源(Phase 21 で実装。下記の契約) */
     HOSTAPI_PORT_CLICK    = 3, /* トーンパレット(hostapi_tone_define のスロット) */
+};
+
+/* ============ 内蔵音源ポート HOSTAPI_PORT_SYNTH の契約 (Phase 21) ============
+ *
+ * アプリは **既存の hostapi_seq_write に積むだけ**でよい。Host API の関数は増えない。
+ *
+ *   { tick: T, port: HOSTAPI_PORT_SYNTH, status: 0x99, data1: note, data2: velocity }
+ *
+ * - **Note On(0x9n)で velocity > 0 のものだけ**を見る。打楽器はワンショットなので
+ *   **Note Off(0x8n)と velocity 0 の Note On は無視する**(鳴りっぱなしにはならない)。
+ *   これによりパターン 1 小節あたりのイベント数が半分になる。
+ * - **チャンネル(0x9n の n)は無視する。** ポートが既に宛先を決めているので、
+ *   チャンネルは二重の宛先指定になる。0x90〜0x9F のどれを書いてもよい。
+ * - **note 番号は GM ドラム準拠。** v1 が鳴らすのは次の 4 つで、**未知の番号は
+ *   何もしない**(ログも出さない。L0 のディスパッチャから呼ばれるため):
+ *     36 = Bass Drum / 38 = Acoustic Snare / 42 = Closed Hi-Hat / 49 = Crash Cymbal
+ *   同じ data1 をそのまま DIN_OUT へ出せば外部音源も同じ音になる。
+ * - **velocity 1..127 はゲインへ線形に写す。** マスター音量
+ *   (hostapi_audio_set_volume)と乗算されるのは CLICK と同じ。
+ * - **同時発音数は HOSTAPI_SYNTH_VOICES。** 溢れたときは
+ *   **同じ note の最も古いボイスを奪い、無ければ全体で最も古いもの**を奪う
+ *   (ハイハットの連打が自分を切る動きになる)。
+ * - **transport_stop / アプリ破棄で鳴っているボイスは消える**(seqcore_reset と同じ)。
+ * - **音色は合成**(ノイズ + 減衰サイン)。v1 では音色を定義する API を持たない
+ *   (将来サンプル再生へ差し替えるときも、この契約は変えない)。
+ * - **MP3 再生中は鳴らない**(実機は同じ I2S を esp_audio_player が使うため排他。
+ *   発音要求は捨てられる)。
+ * - **発音タイミング**: L0 は 20µs 前にしか発火しないので、ホストのミキサは
+ *   **次に書くブロックの先頭**に丸める(ブロック長ぶんのジッタと、書き込み先行ぶんの
+ *   固定遅延が乗る)。従来のクリック(実機 0〜5.4ms / Linux 0〜23ms)より悪くならない。
+ *   仕様と測定は docs/results/phase21.md。
+ */
+#define HOSTAPI_SYNTH_VOICES 8
+
+/* v1 が鳴らす GM ドラムの note 番号 */
+enum {
+    HOSTAPI_SYNTH_NOTE_KICK  = 36,
+    HOSTAPI_SYNTH_NOTE_SNARE = 38,
+    HOSTAPI_SYNTH_NOTE_CHH   = 42,
+    HOSTAPI_SYNTH_NOTE_CRASH = 49,
 };
 
 /* status が MIDI ステータスバイト(0x80 以上)でない場合の内部オペコード */

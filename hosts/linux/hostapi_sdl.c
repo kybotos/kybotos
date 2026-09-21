@@ -78,31 +78,200 @@ typedef struct {
 static ToneDef s_tones[HOSTAPI_TONE_SLOTS];
 static const ToneDef kDefaultClick = {true, 1000, 30, 100};
 
-/* 発音中のボイス(キャッシュレス合成: 再帰振動子)。単声(v2 契約) */
+/* ---- ポリフォニックミキサ (Phase 21) ----
+ * 単声だった Voice を HOSTAPI_SYNTH_VOICES 本にし、CLICK のトーンと内蔵音源
+ * (SYNTH ポート)の両方をここに載せる。合成はキャッシュレス(サインは再帰振動子、
+ * ノイズは xorshift32)で、サンプルごとに libm を呼ばない。
+ * 実機側(src/components/audio)も同じ構造にしてあり、音色の式は両ホストで同一。 */
+
+/* ボイスの種類。SAMPLE への差し替えは voice_render の中身だけで済む(0-d) */
+typedef enum {
+    VK_IDLE = 0,
+    VK_TONE,   /* CLICK ポート / tone_play: 減衰サイン */
+    VK_KICK,   /* ピッチ掃引する減衰サイン */
+    VK_SNARE,  /* ノイズ + 減衰サイン */
+    VK_HAT,    /* ハイパスしたノイズ(短い) */
+    VK_CRASH,  /* ハイパスしたノイズ(長い) */
+} VoiceKind;
+
 typedef struct {
-    int remaining;      /* 残りフレーム(0=idle) */
-    float s, c;         /* sin/cos の回転状態 */
-    float cw, sw;       /* 回転係数 */
+    VoiceKind kind;
+    uint8_t note;        /* SYNTH のとき。ボイス奪取の判定に使う */
+    uint32_t seq;        /* 発音順。最も古いものを奪うため */
+    int remaining;       /* 残りフレーム(0 = idle) */
+    /* サイン(再帰振動子) */
+    float s, c, cw, sw;
     float decay, amp;
+    /* ピッチ掃引(Kick): ブロックごとに係数を作り直す */
+    float f_cur, f_end, f_k;
+    /* ノイズ */
+    uint32_t rng;
+    float n_prev;        /* 1 次ハイパス(差分)用 */
+    float n_amp, n_decay;
 } Voice;
-static Voice s_voice;
+
+static Voice s_voices[HOSTAPI_SYNTH_VOICES];
+static uint32_t s_voice_seq;
 
 static uint64_t s_audio_samples;   /* 再生済みフレーム数(音声クロック) */
-static bool s_click_asap;          /* 即時発音要求: 次のバッファ先頭で発音 */
-static ToneDef s_asap_tone;
 static int s_master_vol = 98;      /* マスター音量(実機の既定と一致) */
 
-/* ボイスをトーン定義から初期化(発音開始)。マスター音量は発音時に焼き込む */
-static void voice_start(const ToneDef* t)
+/* 発音要求のキュー(ロック下で積み、コールバックが取り出す)。
+ * 単一の s_click_asap では、1 コールバックの間に来た複数の発音を落としてしまう */
+typedef struct { uint8_t is_synth; uint8_t note, velocity; ToneDef tone; } Req;
+#define REQ_MAX 32
+static Req s_reqs[REQ_MAX];
+static int s_req_n;
+
+static void req_push(const Req* r)
 {
-    const float w = 2.0f * (float)M_PI * (float)t->freq_hz / CLICK_RATE;
-    s_voice.remaining = CLICK_RATE * t->dur_ms / 1000;
-    s_voice.s = 0.0f;
-    s_voice.c = 1.0f;
-    s_voice.cw = cosf(w);
-    s_voice.sw = sinf(w);
-    s_voice.decay = expf(-3.5f / (float)s_voice.remaining); /* 終端で ~-30dB */
-    s_voice.amp = 12000.0f * t->level / 100.0f * s_master_vol / 100.0f;
+    if (s_req_n < REQ_MAX) s_reqs[s_req_n++] = *r;
+}
+
+static void voice_set_sine(Voice* v, float freq, int frames, float amp)
+{
+    const float w = 2.0f * (float)M_PI * freq / CLICK_RATE;
+    v->s = 0.0f;
+    v->c = 1.0f;
+    v->cw = cosf(w);
+    v->sw = sinf(w);
+    v->amp = amp;
+    v->decay = expf(-3.5f / (float)(frames > 0 ? frames : 1));
+    v->remaining = frames;
+}
+
+/* 空きボイスを取る。無ければ「同じ note の最も古いもの」→「全体で最も古いもの」を奪う */
+static Voice* voice_alloc(uint8_t note)
+{
+    Voice* best = NULL;
+    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
+        if (s_voices[i].kind == VK_IDLE || s_voices[i].remaining <= 0) return &s_voices[i];
+    }
+    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
+        if (s_voices[i].note == note && (!best || s_voices[i].seq < best->seq)) best = &s_voices[i];
+    }
+    if (!best) {
+        for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
+            if (!best || s_voices[i].seq < best->seq) best = &s_voices[i];
+        }
+    }
+    return best;
+}
+
+/* CLICK ポート / tone_play。マスター音量は発音時に焼き込む(従来と同じ) */
+static void voice_start_tone(const ToneDef* t)
+{
+    Voice* v = voice_alloc(0);
+    if (!v) return;
+    memset(v, 0, sizeof(*v));
+    v->kind = VK_TONE;
+    v->seq = ++s_voice_seq;
+    voice_set_sine(v, (float)t->freq_hz, CLICK_RATE * t->dur_ms / 1000,
+                   12000.0f * t->level / 100.0f * s_master_vol / 100.0f);
+}
+
+/* SYNTH ポート。4 音とも「0-d の式」で作る。未知の note は何もしない。
+ * 基準レベルは **4 音同時 + クリックでクリップしない**ように決めた(0-f)。
+ * 実測(Linux の WAV): 4 音同時のピークは 8000 系で 24,781(-2.4dBFS)、
+ * クリック(12,000)が重なると振り切れるので **0.7 倍**にしてある。 */
+static void voice_start_drum(uint8_t note, uint8_t velocity)
+{
+    const float g = (float)velocity / 127.0f * (float)s_master_vol / 100.0f;
+    Voice* v = voice_alloc(note);
+    if (!v) return;
+    memset(v, 0, sizeof(*v));
+    v->seq = ++s_voice_seq;
+    v->note = note;
+    v->rng = 0x9E3779B9u ^ (uint32_t)note ^ (s_voice_seq << 8);
+    switch (note) {
+    case HOSTAPI_SYNTH_NOTE_KICK:
+        v->kind = VK_KICK;
+        voice_set_sine(v, 110.0f, CLICK_RATE * 180 / 1000, 7000.0f * g);
+        v->f_cur = 110.0f;
+        v->f_end = 45.0f;
+        v->f_k = expf(-1.0f / ((float)CLICK_RATE * 0.040f)); /* 掃引 40ms */
+        break;
+    case HOSTAPI_SYNTH_NOTE_SNARE:
+        v->kind = VK_SNARE;
+        voice_set_sine(v, 190.0f, CLICK_RATE * 140 / 1000, 2800.0f * g);
+        v->n_amp = 5600.0f * g;
+        v->n_decay = expf(-4.5f / (float)(CLICK_RATE * 140 / 1000));
+        break;
+    case HOSTAPI_SYNTH_NOTE_CHH:
+        v->kind = VK_HAT;
+        v->remaining = CLICK_RATE * 45 / 1000;
+        v->n_amp = 5600.0f * g;
+        v->n_decay = expf(-5.0f / (float)v->remaining);
+        break;
+    case HOSTAPI_SYNTH_NOTE_CRASH:
+        v->kind = VK_CRASH;
+        v->remaining = CLICK_RATE * 800 / 1000;
+        v->n_amp = 5600.0f * g;
+        v->n_decay = expf(-4.0f / (float)v->remaining);
+        break;
+    default:
+        v->kind = VK_IDLE; /* 未知の note は何もしない(ログも出さない) */
+        v->remaining = 0;
+        break;
+    }
+}
+
+static inline float voice_noise(Voice* v)
+{
+    /* xorshift32。サンプルごとに libm を呼ばない */
+    v->rng ^= v->rng << 13;
+    v->rng ^= v->rng >> 17;
+    v->rng ^= v->rng << 5;
+    return (float)((int32_t)v->rng) * (1.0f / 2147483648.0f);
+}
+
+/* n フレームを acc にミックスする。**サンプル再生に差し替えるときはこの関数だけ** */
+static void voice_render(Voice* v, int32_t* acc, int n)
+{
+    if (v->remaining <= 0) { v->kind = VK_IDLE; return; }
+    if (n > v->remaining) n = v->remaining;
+
+    if (v->kind == VK_KICK) {
+        /* ピッチ掃引はブロック単位で係数を作り直す(サンプルごとに cosf を呼ばない) */
+        v->f_cur = v->f_end + (v->f_cur - v->f_end) * powf(v->f_k, (float)n);
+        const float w = 2.0f * (float)M_PI * v->f_cur / CLICK_RATE;
+        v->cw = cosf(w);
+        v->sw = sinf(w);
+    }
+
+    for (int i = 0; i < n; i++) {
+        float out = 0.0f;
+        switch (v->kind) {
+        case VK_TONE:
+        case VK_KICK:
+        case VK_SNARE: {
+            const float s2 = v->s * v->cw + v->c * v->sw;
+            v->c = v->c * v->cw - v->s * v->sw;
+            v->s = s2;
+            v->amp *= v->decay;
+            out = v->amp * v->s;
+            if (v->kind == VK_SNARE) {
+                v->n_amp *= v->n_decay;
+                out += v->n_amp * voice_noise(v);
+            }
+            break;
+        }
+        case VK_HAT:
+        case VK_CRASH: {
+            const float x = voice_noise(v);
+            const float hp = x - v->n_prev; /* 1 次ハイパス(差分) */
+            v->n_prev = x;
+            v->n_amp *= v->n_decay;
+            out = v->n_amp * hp;
+            break;
+        }
+        default:
+            break;
+        }
+        acc[i] += (int32_t)out;
+    }
+    v->remaining -= n;
+    if (v->remaining <= 0) v->kind = VK_IDLE;
 }
 
 /* ジッタ統計: 発音開始位置(音声クロック)と壁時計を N 発ごとに集計 */
@@ -142,39 +311,88 @@ static void click_record_fire(uint64_t sample)
     }
 }
 
-/* SDL オーディオスレッドから呼ばれる。stream は 16bit ステレオ */
+/* ---- 検証用の WAV 書き出し (Phase 21) ----
+ * 環境変数 MIDIBOX_WAV_OUT が設定されているときだけ、ミキサの出力を追記する。
+ * 既定 off なので既存の挙動は変わらない。4 音同時・ピーク・オンセット間隔を
+ * 耳ではなく数値で確かめるための口(docs/results/phase21.md 0-g)。 */
+static FILE* s_wav;
+static uint32_t s_wav_frames;
+
+static void wav_put32(FILE* f, uint32_t v) { fputc(v & 0xff, f); fputc((v >> 8) & 0xff, f); fputc((v >> 16) & 0xff, f); fputc((v >> 24) & 0xff, f); }
+static void wav_put16(FILE* f, uint16_t v) { fputc(v & 0xff, f); fputc((v >> 8) & 0xff, f); }
+
+static void wav_open(void)
+{
+    const char* path = getenv("MIDIBOX_WAV_OUT");
+    if (!path || !*path) return;
+    s_wav = fopen(path, "wb");
+    if (!s_wav) { fprintf(stderr, "MIDIBOX_WAV_OUT: cannot open %s\n", path); return; }
+    /* ヘッダは閉じるときに書き直す */
+    fwrite("RIFF????WAVEfmt ", 1, 16, s_wav);
+    wav_put32(s_wav, 16);
+    wav_put16(s_wav, 1);                 /* PCM */
+    wav_put16(s_wav, 2);                 /* stereo */
+    wav_put32(s_wav, CLICK_RATE);
+    wav_put32(s_wav, CLICK_RATE * 4);
+    wav_put16(s_wav, 4);
+    wav_put16(s_wav, 16);
+    fwrite("data????", 1, 8, s_wav);
+    fprintf(stderr, "wav: writing to %s\n", path);
+}
+
+static void wav_close(void)
+{
+    if (!s_wav) return;
+    const uint32_t bytes = s_wav_frames * 4;
+    fseek(s_wav, 4, SEEK_SET);  wav_put32(s_wav, 36 + bytes);
+    fseek(s_wav, 40, SEEK_SET); wav_put32(s_wav, bytes);
+    fclose(s_wav);
+    fprintf(stderr, "wav: %u frames\n", s_wav_frames);
+    s_wav = NULL;
+    s_wav_frames = 0;
+}
+
+/* SDL オーディオスレッドから呼ばれる。stream は 16bit ステレオ。
+ * **240 フレームのブロックに切って処理する**(実機のミキサと同じ粒度。
+ * 発音は「次に書くブロックの先頭」に丸まる = docs/results/phase21.md 0-c の案 A)。 */
+#define MIX_BLOCK 240
+
 static void audio_callback(void* userdata, Uint8* stream, int len)
 {
     (void)userdata;
-    memset(stream, 0, len);
     int16_t* out = (int16_t*)stream;
     const int frames = len / 4;
-    const uint64_t buf_start = s_audio_samples;
+    int32_t acc[MIX_BLOCK];
 
-    /* 発火判定: 即時発音要求があれば、このバッファの先頭で開始する
-     * (予約発音 tone_schedule / click_schedule は Phase 14 で削除。
-     * CLICK ポートの発音は tone_play_impl 経由の即時発音のみ)。 */
-    int start_off = -1;
-    const ToneDef* start_tone = NULL;
-    if (s_click_asap) {
-        s_click_asap = false;
-        start_off = 0;
-        start_tone = &s_asap_tone;
-        click_record_fire(buf_start);
+    for (int off = 0; off < frames; off += MIX_BLOCK) {
+        int n = frames - off;
+        if (n > MIX_BLOCK) n = MIX_BLOCK;
+
+        /* ブロックの先頭で、溜まっている発音要求をすべて開始する */
+        if (s_req_n > 0) {
+            for (int i = 0; i < s_req_n; i++) {
+                if (s_reqs[i].is_synth) voice_start_drum(s_reqs[i].note, s_reqs[i].velocity);
+                else                    voice_start_tone(&s_reqs[i].tone);
+            }
+            s_req_n = 0;
+            click_record_fire(s_audio_samples + (uint64_t)off);
+        }
+
+        memset(acc, 0, sizeof(int32_t) * (size_t)n);
+        for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) {
+            if (s_voices[v].kind != VK_IDLE) voice_render(&s_voices[v], acc, n);
+        }
+        for (int i = 0; i < n; i++) {
+            int32_t v = acc[i];
+            if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+            out[(off + i) * 2] = (int16_t)v;
+            out[(off + i) * 2 + 1] = (int16_t)v;
+        }
     }
 
-    for (int i = 0; i < frames; i++) {
-        if (start_off >= 0 && i == start_off) voice_start(start_tone);
-        if (s_voice.remaining > 0) {
-            const float s2 = s_voice.s * s_voice.cw + s_voice.c * s_voice.sw;
-            s_voice.c = s_voice.c * s_voice.cw - s_voice.s * s_voice.sw;
-            s_voice.s = s2;
-            s_voice.amp *= s_voice.decay;
-            const int16_t v = (int16_t)(s_voice.amp * s_voice.s);
-            out[i * 2] = v;
-            out[i * 2 + 1] = v;
-            s_voice.remaining--;
-        }
+    if (s_wav) {
+        fwrite(out, 4, (size_t)frames, s_wav);
+        s_wav_frames += (uint32_t)frames;
     }
 
     s_audio_samples += (uint64_t)frames;
@@ -262,8 +480,9 @@ void host_sdl_audio_reset(void)
      * マスター音量は既定に戻す(アプリ起動時の初期状態を一定にする) */
     if (s_audio) {
         SDL_LockAudioDevice(s_audio);
-        s_click_asap = false;
-        s_voice.remaining = 0;
+        s_req_n = 0;
+        memset(s_voices, 0, sizeof(s_voices));   /* 鳴っているボイスを消す */
+        s_voice_seq = 0;
         s_fire_count = 0;
         s_master_vol = 98;
         for (int i = 0; i < HOSTAPI_TONE_SLOTS; i++) s_tones[i] = (ToneDef){0};
@@ -658,13 +877,16 @@ bool host_sdl_init(void)
     want.freq = CLICK_RATE;
     want.format = AUDIO_S16SYS;
     want.channels = 2;
-    want.samples = 1024; /* コールバック粒度 ~23ms(発音自体はバッファ内オフセットでサンプル精度) */
+    /* Phase 21: 1024(~23.2ms)から 256(~5.8ms)へ。実機のミキサのブロック長
+     * (240 フレーム = 5.44ms)に近づけ、発音の丸めを両ホストでそろえる */
+    want.samples = 256;
     want.callback = audio_callback;
     s_audio = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (!s_audio) {
         fprintf(stderr, "SDL_OpenAudioDevice failed: %s (continuing without sound)\n",
                 SDL_GetError());
     } else {
+        wav_open();
         SDL_PauseAudioDevice(s_audio, 0);
     }
 
@@ -698,6 +920,7 @@ void host_sdl_shutdown(void)
     Mix_Quit();
 #endif
     if (s_audio) SDL_CloseAudioDevice(s_audio);
+    wav_close();
     if (s_renderer) SDL_DestroyRenderer(s_renderer);
     if (s_window) SDL_DestroyWindow(s_window);
     SDL_Quit();
@@ -992,10 +1215,10 @@ static int32_t tone_play_impl(int32_t slot)
     if (!s_audio) return -1;
     ToneDef tone;
     if (!tone_lookup(slot, &tone)) return -1;
-    /* 即時発音 = 次のコールバックバッファ先頭で開始 */
+    /* 即時発音 = 次に書くブロックの先頭で開始(Phase 21: 要求キューに積む) */
+    Req r = { .is_synth = 0, .note = 0, .velocity = 0, .tone = tone };
     SDL_LockAudioDevice(s_audio);
-    s_asap_tone = tone;
-    s_click_asap = true;
+    req_push(&r);
     SDL_UnlockAudioDevice(s_audio);
     return 0;
 }
@@ -1006,6 +1229,18 @@ static int32_t tone_play_impl(int32_t slot)
 void host_click_play_slot(uint32_t slot)
 {
     (void)tone_play_impl((int32_t)slot);
+}
+
+/* L0 の SYNTH ポート(Phase 21)。at_host_us は案 A では使わない
+ * (docs/results/phase21.md 0-c。案 B へ移るときにここでブロック内オフセットを求める) */
+void host_synth_note(uint8_t note, uint8_t velocity, int64_t at_host_us)
+{
+    (void)at_host_us;
+    if (!s_audio) return;
+    Req r = { .is_synth = 1, .note = note, .velocity = velocity, .tone = (ToneDef){0} };
+    SDL_LockAudioDevice(s_audio);
+    req_push(&r);
+    SDL_UnlockAudioDevice(s_audio);
 }
 
 void native_hostapi_play_click(wasm_exec_env_t exec_env)

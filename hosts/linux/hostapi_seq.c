@@ -140,9 +140,14 @@ static void hook_click(uint32_t slot)
     host_click_play_slot(slot);
 }
 
+static void hook_synth(uint8_t note, uint8_t velocity, int64_t at_host_us)
+{
+    host_synth_note(note, velocity, at_host_us);
+}
+
 static const seqcore_hooks_t k_hooks = {
     clock_now_us, hook_lock, hook_unlock, hook_arm,
-    hook_disarm, hook_send_midi, hook_click,
+    hook_disarm, hook_send_midi, hook_click, hook_synth,
 };
 
 void host_seq_init(void)

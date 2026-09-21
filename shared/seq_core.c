@@ -255,7 +255,10 @@ static void port_send_realtime(uint8_t b)
     if (s_hooks && s_hooks->send_midi) s_hooks->send_midi(&b, 1);
 }
 
-static void port_dispatch(const hostapi_seq_event_t* ev)
+/* at_host_us = この取り出しの締め切り(= next の host_us)。**ロックの中で求めた値**を渡す
+ * (host_us_of_locked はロック下専用で、送出はロックの外で行うため)。同じ取り出しに
+ * 混ざる遅延イベント(tick < next)は既に過ぎているので、締め切りの時刻でよい */
+static void port_dispatch(const hostapi_seq_event_t* ev, int64_t at_host_us)
 {
     switch (ev->port) {
     case HOSTAPI_PORT_DIN_OUT: {
@@ -274,8 +277,16 @@ static void port_dispatch(const hostapi_seq_event_t* ev)
             s_hooks->click(ev->param);
         }
         break;
+    case HOSTAPI_PORT_SYNTH:
+        /* 内蔵音源(Phase 21)。打楽器はワンショットなので **Note On だけ**を見る。
+         * Note Off と velocity 0 の Note On は無視する。チャンネル(0x9n の n)も
+         * 無視する — ポートが既に宛先を決めているため(shared/hostapi_defs.h の契約) */
+        if ((ev->status & 0xF0) == 0x90 && ev->data2 != 0 && s_hooks && s_hooks->synth) {
+            s_hooks->synth(ev->data1, ev->data2, at_host_us);
+        }
+        break;
     default:
-        break; /* USB_MIDI / SYNTH は予約のみ */
+        break; /* USB_MIDI は予約のみ */
     }
 }
 
@@ -364,7 +375,8 @@ void seqcore_dispatch(void)
         bool has = false;
         const uint32_t next = next_deadline_locked(&has);
         if (!has) { unlock(); return; }
-        const int64_t due = host_us_of_locked(next) - FIRE_ADVANCE_US;
+        const int64_t next_us = host_us_of_locked(next);
+        const int64_t due = next_us - FIRE_ADVANCE_US;
         const int64_t t_now = now_us();
         if (due > t_now + SLACK_US) {
             arm = due - t_now;
@@ -417,7 +429,7 @@ void seqcore_dispatch(void)
 
         /* 送出はロックの外。リアルタイムバイトを最優先で出す(§7-4)*/
         if (emit_clock) port_send_realtime(0xF8);
-        for (int i = 0; i < nemit; ++i) port_dispatch(&emit[i]);
+        for (int i = 0; i < nemit; ++i) port_dispatch(&emit[i], next_us);
         if (stopped) {
             /* 同 tick の先行イベントの後に Stop。再アームはしない(STOPPED なので
              * 他スレッドの rearm もアームしない)*/

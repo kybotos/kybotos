@@ -41,6 +41,7 @@ void host_sdl_debug_dump_coords(int wx, int wy, int lx, int ly);
 
 /* L0 の CLICK ポート(Phase 11)からの発音。既存の即時発音経路を共有する */
 void host_click_play_slot(uint32_t slot);
+void host_synth_note(uint8_t note, uint8_t velocity, int64_t at_host_us); /* Phase 21 */
 
 /* shared/hostapi_defs.h の X-macro が参照する native_* 実装 */
 void native_hostapi_draw_text(wasm_exec_env_t exec_env, int32_t x, int32_t y,
