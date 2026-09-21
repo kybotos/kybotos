@@ -334,6 +334,13 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
 - 代償は internal の静的 +16KB で、**free_int 89,368 → 73,052**、**largest_int 40,960 → 31,744**。
   **回帰のしきい値を `MIN_FREE_INT=65000` / `MIN_LARGEST_INT=24576` に下げた**
   (`scripts/device-regress.conf`。基準値から 8KB 下)。
+- **Phase 19b で U-6 を実施し、プールを 96KB にした(ユーザー承認済み)。**
+  `.wasm` バッファを internal の `malloc` から **PSRAM(`heap_caps_malloc(MALLOC_CAP_SPIRAM)`)**へ移した。
+  実測(sequencer): プールの残り **10,240 → 26,624 B**、**実行中の `free_int` 45,968 → 56,212**、
+  停止時の基準は **free_int 56,316 / largest_int 31,744**(プール静的 +16KB のぶん下がった)。
+  **PSRAM 上のバイトコード実行で遅くならない**ことも確認した(`app_tick` avg 2,332 → 1,207µs)。
+  回帰しきい値は **`MIN_FREE_INT=48000` / `MIN_LARGEST_INT=24576`**。タイル編集を積んだ最終形で
+  **プール 81,560 / 98,112(残り 16,552 B)**、`.wasm` 31,352 B。
 - **プール消費は `.wasm` の増分の約 3 倍で増える**(18a 以降の実測)。
   Phase 20 以降でさらに増えるなら、**U-6(`.wasm` バッファを PSRAM へ)で internal を取り戻してから**
   プールを足すのが順序として自然である(U-6 はプール消費そのものは減らさない)。
