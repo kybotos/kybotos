@@ -100,6 +100,14 @@ private:
     std::atomic<bool> finished_{false};
     std::atomic<uint8_t> volume_{98}; // default near max
 
+    // I2S チャネルが有効か (Phase 21)。再構成が途中で失敗しても無効のまま
+    // 放置しないための記録。false なら次の書き込み前に作り直す。
+    bool enabled_ = false;
+    // MP3 が I2S を占有しているか (Phase 21)。**audio_player_get_state() は使わない** —
+    // stop() が pause() を経由すると PAUSE のまま IDLE に戻らないため
+    // (IDLE への遷移は「state==PLAYING かつキューが空」のときだけ)。
+    std::atomic<bool> mp3_active_{false};
+
     // Current i2s format
     uint32_t cur_rate_ = 44100;
     uint8_t  cur_bits_ = 16;

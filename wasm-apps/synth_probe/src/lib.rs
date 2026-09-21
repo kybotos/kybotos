@@ -8,6 +8,10 @@
 //   小節 3: クリック(CLICK ポート)とドラムを重ねる(両方鳴ること)
 //   小節 4: 1 拍目に **12 発**を同じ tick に置く(ボイス 8 本を溢れさせる)
 //
+// さらに **MP3 との共存(V7)** を自動で試す。小節 8 で `test.mp3` を再生し、
+// 小節 12 で止め、以後もドラムを打ち続ける。**MP3 を止めたあとに音が戻るか**が
+// 判定点(Phase 21 でここが壊れて無音のまま固定される不具合を踏んだ)。
+//
 // 回帰 6 本には入れない(docs/results/phase21.md 0-g)。
 #![no_std]
 
@@ -17,6 +21,8 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 extern "C" {
+    fn hostapi_audio_play(path: *const u8, len: u32) -> i32;
+    fn hostapi_audio_ctrl(cmd: i32) -> i32;
     fn hostapi_draw_text(x: i32, y: i32, ptr: *const u8, len: u32);
     fn hostapi_fill_rect(x: i32, y: i32, w: i32, h: i32, rgb888: u32);
     fn hostapi_transport_start() -> i32;
@@ -97,6 +103,8 @@ fn flush() {
 
 /// 次に積む小節(0 始まり、4 小節で 1 周)
 static mut NEXT_BAR: u32 = 0;
+/// mp3_phase を小節ごとに 1 回だけ呼ぶための記録
+static mut LAST_MP3_BAR: u32 = u32::MAX;
 
 fn build_bar(bar: u32) {
     let t0 = bar * BAR;
@@ -129,6 +137,21 @@ fn build_bar(bar: u32) {
         }
     }
     flush();
+}
+
+/// MP3 との共存(V7)。小節 8 で再生、小節 12 で停止する。
+/// ホストは MP3 の間ミキサを止めるので、**この間ドラムは鳴らない**のが正しい。
+fn mp3_phase(bar: u32) {
+    unsafe {
+        if bar == 8 {
+            let p = b"test.mp3";
+            hostapi_audio_play(p.as_ptr(), p.len() as u32);
+            hostapi_draw_text(8, 186, b"mp3: playing".as_ptr(), 12);
+        } else if bar == 12 {
+            hostapi_audio_ctrl(3); // HOSTAPI_AUDIO_CMD_STOP
+            hostapi_draw_text(8, 186, b"mp3: stopped".as_ptr(), 12);
+        }
+    }
 }
 
 fn label(y: i32, s: &[u8]) {
@@ -176,6 +199,11 @@ pub extern "C" fn app_tick() {
             NEXT_BAR += 1;
             build_bar(b);
         }
+        // MP3 の開始 / 停止は「今の小節」に合わせる(先読みではない)
+        if cur_bar != LAST_MP3_BAR {
+            LAST_MP3_BAR = cur_bar;
+            mp3_phase(cur_bar);
+        }
         // 進行表示(小節番号)
         let n = cur_bar % 4 + 1;
         let s = [b'b', b'a', b'r', b' ', b'0' + n as u8];
@@ -187,5 +215,6 @@ pub extern "C" fn app_tick() {
 pub extern "C" fn app_exit() {
     unsafe {
         hostapi_transport_stop();
+        hostapi_audio_ctrl(3); // MP3 を止めてから抜ける
     }
 }

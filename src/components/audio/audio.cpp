@@ -11,6 +11,23 @@ namespace audio {
 
 static const char* TAG = "AUDIO/MP3";
 
+// ---- I2S アクセスの排他 (Phase 21) ----
+//
+// Phase 21 でミキサが**常時**書くようになったため、MP3 の開始・終了で
+// audio_player が clk_set_fn(→ reconfig_rate)を呼ぶタイミングと、ミキサの
+// i2s_channel_write が重なるようになった。reconfig は disable → 設定 → enable の
+// 3 段なので、その途中に別タスクが書き込むとチャネルの状態が割れる。
+// **書き込みと再構成をこのミューテックスで直列化する。**(恒久物なので静的確保)
+static StaticSemaphore_t s_i2s_mux_buf;
+static SemaphoreHandle_t s_i2s_mux;
+
+static void i2s_mux_ensure()
+{
+    if (!s_i2s_mux) s_i2s_mux = xSemaphoreCreateMutexStatic(&s_i2s_mux_buf);
+}
+static void i2s_lock()   { if (s_i2s_mux) xSemaphoreTake(s_i2s_mux, portMAX_DELAY); }
+static void i2s_unlock() { if (s_i2s_mux) xSemaphoreGive(s_i2s_mux); }
+
 // Clock Authority(Phase 11)のレートマスター。I2S TX の on_sent は
 // データ未供給時(無音)もフリーランで発火するので、サンプルカウントは
 // 途切れず単調増加する(P10-1)。ISR コンテキストなので加算のみ。
@@ -70,6 +87,7 @@ bool Mp3Player::init(uint32_t sample_rate_hz, uint8_t bits, bool stereo) noexcep
 }
 
 bool Mp3Player::ensure_i2s(uint32_t rate_hz, uint8_t bits, bool stereo) noexcept {
+    i2s_mux_ensure();
     if (tx_) {
         i2s_data_bit_width_t bw = (bits == 32) ? I2S_DATA_BIT_WIDTH_32BIT : I2S_DATA_BIT_WIDTH_16BIT;
         i2s_slot_mode_t sm = stereo ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO;
@@ -107,6 +125,7 @@ bool Mp3Player::ensure_i2s(uint32_t rate_hz, uint8_t bits, bool stereo) noexcept
         ESP_LOGE(TAG, "i2s_channel_enable failed");
         return false;
     }
+    enabled_ = true;
     cur_rate_ = rate_hz; cur_bits_ = bits; cur_stereo_ = stereo;
     return true;
 }
@@ -161,6 +180,8 @@ uint32_t s_voice_seq;
 // ミキサのバッファはタスクスタックではなく静的に置く(恒久物は静的確保: 6B / 7B-fix)
 int32_t s_acc[kMixBlock];
 int16_t s_chunk[kMixBlock * 2];
+
+bool s_mixer_suspended; // ログを状態変化のときだけ出すための記録
 
 void voice_set_sine(Voice* v, float freq, int frames, float amp)
 {
@@ -357,14 +378,21 @@ void Mp3Player::click_task_loop() noexcept {
     for (;;) {
         // MP3 が鳴っている間は書かない(同じ I2S を audio_player が使う)。
         // 溜まった発音要求は捨てる(契約どおり)。
-        if (is_playing() || is_paused()) {
+        const bool busy = mp3_active_.load();
+        if (busy != s_mixer_suspended) {
+            s_mixer_suspended = busy;
+            ESP_LOGI(TAG, "mixer %s", busy ? "suspended (mp3)" : "resumed");
+        }
+        if (busy) {
             xQueueReset(tone_queue_);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
         if (!tx_) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
-        // MP3 が 22.05kHz 等へ変えたままなら 44.1kHz へ戻す(同一設定なら no-op)
-        if (cur_rate_ != kMixRate || cur_bits_ != 16 || !cur_stereo_) {
+        // MP3 が 22.05kHz 等へ変えたままなら 44.1kHz へ戻す。
+        // **`!enabled_` も条件に入れる**ので、チャネルが無効になっていれば作り直す
+        // (これが無いと一度の失敗で無音のまま固定される。Phase 21 で踏んだ)
+        if (!enabled_ || cur_rate_ != kMixRate || cur_bits_ != 16 || !cur_stereo_) {
             if (!ensure_i2s(kMixRate, 16, true)) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
         }
 
@@ -391,7 +419,7 @@ void Mp3Player::click_task_loop() noexcept {
         } else {
             memset(s_chunk, 0, sizeof(s_chunk));
         }
-        i2s_write(s_chunk, sizeof(s_chunk), 100);
+        i2s_write(s_chunk, sizeof(s_chunk), 50);
     }
 }
 
@@ -402,7 +430,9 @@ bool Mp3Player::reconfig_rate(uint32_t rate_hz, uint32_t bits_cfg, i2s_slot_mode
     if (bits_cfg == I2S_DATA_BIT_WIDTH_32BIT) bits = 32;
     else if (bits_cfg == I2S_DATA_BIT_WIDTH_24BIT) bits = 32; // use 32-slot for 24bit
     else bits = 16;
-    if (cur_rate_ == rate_hz && cur_bits_ == bits && cur_stereo_ == stereo) return true;
+    // **enabled_ も条件に入れる**: 設定が同じでもチャネルが無効なら作り直す
+    if (cur_rate_ == rate_hz && cur_bits_ == bits && cur_stereo_ == stereo && enabled_) return true;
+
     i2s_std_config_t std_cfg{};
     std_cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(rate_hz);
     std_cfg.slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(
@@ -414,22 +444,61 @@ bool Mp3Player::reconfig_rate(uint32_t rate_hz, uint32_t bits_cfg, i2s_slot_mode
     std_cfg.gpio_cfg.dout = pins_.dout;
     std_cfg.gpio_cfg.din  = pins_.din;
     std_cfg.gpio_cfg.invert_flags = { .mclk_inv=false, .bclk_inv=false, .ws_inv=false };
-    if (i2s_channel_disable(tx_) != ESP_OK) return false;
-    if (i2s_channel_reconfig_std_clock(tx_, &std_cfg.clk_cfg) != ESP_OK) return false;
-    if (i2s_channel_reconfig_std_slot(tx_, &std_cfg.slot_cfg) != ESP_OK) return false;
-    // レート切替 = Clock Authority のアンカー張り替え + 換算係数の切替
-    // (再構成中は on_sent が止まるが、音楽時間軸は esp_timer 外挿で連続する。
-    //  実機は I2S と esp_timer が同一水晶なので外挿誤差は実質ゼロ。§3)
-    clockauth::OnFormatChanged(rate_hz, bits, stereo);
-    if (i2s_channel_enable(tx_) != ESP_OK) return false;
-    cur_rate_ = rate_hz; cur_bits_ = bits; cur_stereo_ = stereo;
-    return true;
+
+    i2s_lock();
+    // **既に無効なら INVALID_STATE が返るが、それは失敗ではない**
+    // (Phase 21 以前はここで return しており、一度失敗するとチャネルが無効のまま
+    //  固定されて二度と音が出なくなっていた)
+    esp_err_t err = i2s_channel_disable(tx_);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        i2s_unlock();
+        ESP_LOGW(TAG, "i2s disable failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    enabled_ = false;
+
+    bool ok = true;
+    err = i2s_channel_reconfig_std_clock(tx_, &std_cfg.clk_cfg);
+    if (err != ESP_OK) { ESP_LOGW(TAG, "reconfig clock: %s", esp_err_to_name(err)); ok = false; }
+    if (ok) {
+        err = i2s_channel_reconfig_std_slot(tx_, &std_cfg.slot_cfg);
+        if (err != ESP_OK) { ESP_LOGW(TAG, "reconfig slot: %s", esp_err_to_name(err)); ok = false; }
+    }
+    if (ok) {
+        // レート切替 = Clock Authority のアンカー張り替え + 換算係数の切替
+        // (再構成中は on_sent が止まるが、音楽時間軸は esp_timer 外挿で連続する。
+        //  実機は同一水晶なので外挿誤差は実質ゼロ。§3)
+        clockauth::OnFormatChanged(rate_hz, bits, stereo);
+        cur_rate_ = rate_hz; cur_bits_ = bits; cur_stereo_ = stereo;
+    }
+
+    // **成否にかかわらず必ず有効化を試みる**(無効のまま抜けない)
+    err = i2s_channel_enable(tx_);
+    if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+        enabled_ = true;
+    } else {
+        ESP_LOGW(TAG, "i2s enable failed: %s", esp_err_to_name(err));
+    }
+    i2s_unlock();
+    return ok && enabled_;
 }
 
 bool Mp3Player::i2s_write(void* data, size_t len, uint32_t timeout_ms, size_t* written) noexcept {
+    if (!tx_) return false;
     size_t bw = 0;
+    i2s_lock();
     esp_err_t err = i2s_channel_write(tx_, data, len, &bw, timeout_ms);
+    i2s_unlock();
     if (written) *written = bw;
+    if (err != ESP_OK) {
+        // 書けない状態が続くと**無音のまま黙って止まる**ので、必ず見えるようにする
+        // (Phase 21 で実際に踏んだ。チャネルが無効のまま放置されていた)
+        enabled_ = false; // 次のループで ensure_i2s による再構成を促す
+        static uint32_t s_warned;
+        if ((s_warned++ % 200) == 0) {
+            ESP_LOGW(TAG, "i2s_write failed (%s), will reconfigure", esp_err_to_name(err));
+        }
+    }
     return err == ESP_OK;
 }
 
@@ -469,6 +538,7 @@ void Mp3Player::player_callback(audio_player_cb_ctx_t* ctx)
         ESP_LOGI(TAG, "Playback finished");
         Music_Next_Flag = true;
         s_self->finished_.store(true);
+        s_self->mp3_active_.store(false); // 自然終了でもミキサへ返す (Phase 21)
         // FILE* is closed by audio_player; do not fclose() here
         s_self->file_ = nullptr;
     }
@@ -492,12 +562,14 @@ bool Mp3Player::play_file(const std::string& path) noexcept {
     current_path_ = path;
     finished_.store(false);
     Music_Next_Flag = false;
+    mp3_active_.store(true); // ここから I2S は MP3 のもの (Phase 21)
     
 #if HAVE_ESP_AUDIO_PLAYER
     expected_event_ = AUDIO_PLAYER_CALLBACK_EVENT_PLAYING;
     esp_err_t ret = audio_player_play(file_);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "audio_player_play failed: %d", (int)ret);
+        mp3_active_.store(false);
         fclose(file_); file_ = nullptr;
         return false;
     }
@@ -531,6 +603,7 @@ void Mp3Player::resume() noexcept {
 }
 
 void Mp3Player::stop() noexcept {
+    mp3_active_.store(false); // ミキサへ I2S を返す (Phase 21)
     // Best-effort stop: pause + close file
     pause();
 #if HAVE_ESP_AUDIO_PLAYER
