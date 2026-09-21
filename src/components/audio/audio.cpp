@@ -472,6 +472,23 @@ bool Mp3Player::reconfig_rate(uint32_t rate_hz, uint32_t bits_cfg, i2s_slot_mode
         cur_rate_ = rate_hz; cur_bits_ = bits; cur_stereo_ = stereo;
     }
 
+    // **DMA に残っている前のフォーマットのデータを無音で押し出す。**
+    // `i2s_channel_disable()` はポインタとメッセージキューを戻すだけで
+    // **バッファの中身は消さない**(IDF の実装を確認済み)。そのまま有効化すると
+    // **前のデータが新しいレートで再生される**ので、22.05kHz モノラルの MP3 の残りが
+    // 44.1kHz ステレオで鳴ると 4 倍速の短い高音(「ピッ」)になる。Phase 21 で実際に出た。
+    // preload は無効(READY)の間だけ呼べるので、ここが唯一の place になる。
+    {
+        static const int16_t kSilence[240 * 2] = {};
+        size_t loaded = 0;
+        size_t guard = 0;
+        do {
+            loaded = 0;
+            if (i2s_channel_preload_data(tx_, kSilence, sizeof(kSilence), &loaded) != ESP_OK) break;
+            guard += loaded;
+        } while (loaded == sizeof(kSilence) && guard < 64 * 1024);
+    }
+
     // **成否にかかわらず必ず有効化を試みる**(無効のまま抜けない)
     err = i2s_channel_enable(tx_);
     if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
