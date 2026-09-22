@@ -33,6 +33,9 @@ public:
         gpio_num_t din  = GPIO_NUM_NC;  // Not used (no RX)
     };
 
+    /// マスター音量の既定値(Phase 21b)。**両ホストで同じ値にすること**
+    static constexpr uint8_t kDefaultVolume = 50;
+
     Mp3Player() noexcept;                  // uses default pins
     explicit Mp3Player(const Pins& pins) noexcept;
     ~Mp3Player();
@@ -101,7 +104,9 @@ private:
     i2s_chan_handle_t rx_ = nullptr; // unused
     std::string current_path_;
     std::atomic<bool> finished_{false};
-    std::atomic<uint8_t> volume_{98}; // default near max
+    // マスター音量の既定値(Phase 21b)。**装置の設定**なのでアプリ起動では戻らない。
+    // 98 は HW のつまみを最大にすると大きすぎたため 50 にした(暫定。実機の試聴で決める)
+    std::atomic<uint8_t> volume_{kDefaultVolume};
 
     // I2S チャネルが有効か (Phase 21)。再構成が途中で失敗しても無効のまま
     // 放置しないための記録。false なら次の書き込み前に作り直す。

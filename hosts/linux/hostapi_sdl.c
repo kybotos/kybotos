@@ -114,7 +114,10 @@ static Voice s_voices[HOSTAPI_SYNTH_VOICES];
 static uint32_t s_voice_seq;
 
 static uint64_t s_audio_samples;   /* 再生済みフレーム数(音声クロック) */
-static int s_master_vol = 98;      /* マスター音量(実機の既定と一致) */
+/* マスター音量の既定値(Phase 21b)。**実機の Mp3Player::kDefaultVolume と同じ値にすること**。
+ * 98 は HW のつまみを最大にすると大きすぎたため 50 にした(暫定。実機の試聴で決める) */
+#define DEFAULT_MASTER_VOL 50
+static int s_master_vol = DEFAULT_MASTER_VOL;
 
 /* 発音要求のキュー(ロック下で積み、コールバックが取り出す)。
  * 単一の s_click_asap では、1 コールバックの間に来た複数の発音を落としてしまう */
@@ -477,14 +480,14 @@ void host_sdl_audio_reset(void)
     s_audio_state = HOSTAPI_AUDIO_STOPPED;
 
     /* トーン発音状態・トーンパレットもリセット(Phase 7A/7C 契約)。
-     * マスター音量は既定に戻す(アプリ起動時の初期状態を一定にする) */
+     * **マスター音量はここでは触らない(Phase 21b)。** 装置の設定としてホストが持ち、
+     * アプリを切り替えても持続する(契約は shared/hostapi_defs.h の audio)。 */
     if (s_audio) {
         SDL_LockAudioDevice(s_audio);
         s_req_n = 0;
         memset(s_voices, 0, sizeof(s_voices));   /* 鳴っているボイスを消す */
         s_voice_seq = 0;
         s_fire_count = 0;
-        s_master_vol = 98;
         for (int i = 0; i < HOSTAPI_TONE_SLOTS; i++) s_tones[i] = (ToneDef){0};
         s_tones[0] = kDefaultClick; /* slot 0 = v0 互換の既定クリック */
         SDL_UnlockAudioDevice(s_audio);

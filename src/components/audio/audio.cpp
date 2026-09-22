@@ -42,7 +42,7 @@ static Mp3Player* g_player = nullptr;
 Mp3Player* Mp3Player::s_self = nullptr;
 
 extern "C" {
-uint8_t Audio_Volume = 98;
+uint8_t Audio_Volume = Mp3Player::kDefaultVolume; // Phase 21b
 bool    Music_Next_Flag = false;
 }
 

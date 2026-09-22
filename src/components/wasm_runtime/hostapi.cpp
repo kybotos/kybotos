@@ -722,13 +722,13 @@ void hostapi_audio_reset()
     s_audio_state.store(HOSTAPI_AUDIO_STOPPED);
 
     // トーン発音統計もリセット (Phase 7A 契約)。
-    // マスター音量は既定 98 に戻す(アプリ起動時の初期状態を一定にする)
+    // **マスター音量はここでは触らない(Phase 21b)。** 装置の設定としてホストが持ち、
+    // アプリを切り替えても持続する(契約は shared/hostapi_defs.h の audio)。
     portENTER_CRITICAL(&s_click_mux);
     s_click_fire_count = 0;
     portEXIT_CRITICAL(&s_click_mux);
     tone_table_reset(); // トーンパレットも初期状態へ (Phase 7C 契約)
     audio::Synth_Reset(); // 鳴っているボイスを消す (Phase 21 の契約)
-    audio::Volume_adjustment(98);
     midi::Midi_Reset(); // MIDI Clock 生成も必ず停止する (Phase 8b 契約)
     seq::Reset();       // L0/L1 も初期状態へ (Phase 11)
 }
