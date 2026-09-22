@@ -25,6 +25,7 @@
 #include "wasm_export.h"
 #include "hostapi_defs.h"
 #include "hostapi_sdl.h"
+#include "master_ui.h"   /* Phase 21b */
 #include "hostapi_midi.h"
 #include "hostapi_seq.h"
 
@@ -306,6 +307,7 @@ int main(int argc, char** argv)
     }
 
     if (!host_sdl_init()) return 1;
+    host_sdl_masterui_init(); /* Phase 21b: マスター設定 */
     host_midi_init();
     host_seq_init();
 
@@ -451,9 +453,11 @@ int main(int argc, char** argv)
                         continue;
                     }
                 }
+                masterui_tick(); /* `-` / `+` の長押し連打(Phase 21b)*/
                 host_sdl_render();
                 SDL_Delay(APP_TICK_MS);
             } else {
+                masterui_tick();
                 menu_render(hover);
                 SDL_Delay(30);
             }

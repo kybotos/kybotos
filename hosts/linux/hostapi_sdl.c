@@ -29,6 +29,7 @@
 
 #include "font8x8_basic.h"
 #include "hostapi_defs.h"
+#include "master_ui.h"   /* Phase 21b: マスター設定(両ホスト共有)*/
 #include "hostapi_midi.h"
 #include "hostapi_seq.h"
 
@@ -582,6 +583,24 @@ int32_t native_hostapi_audio_ctrl(wasm_exec_env_t exec_env, int32_t cmd)
     }
 }
 
+/* ---- マスター設定のフック(Phase 21b)---- */
+static void masterui_set_vol_cb(int v)
+{
+    if (s_audio) SDL_LockAudioDevice(s_audio);
+    s_master_vol = v;
+    if (s_audio) SDL_UnlockAudioDevice(s_audio);
+#ifdef HAVE_SDL_MIXER
+    if (s_mixer_ready) Mix_VolumeMusic(v * MIX_MAX_VOLUME / 100);
+#endif
+}
+static uint32_t masterui_now_cb(void) { return SDL_GetTicks() - s_start_ms; }
+static const masterui_hooks_t k_masterui_hooks = { masterui_set_vol_cb, masterui_now_cb };
+
+void host_sdl_masterui_init(void)
+{
+    masterui_init(&k_masterui_hooks, DEFAULT_MASTER_VOL);
+}
+
 void native_hostapi_audio_set_volume(wasm_exec_env_t exec_env, int32_t v)
 {
     (void)exec_env;
@@ -772,7 +791,25 @@ void host_sdl_clear_events(void)
     s_last_y = 0;
 }
 
+/* 実際にキューへ積む(マスター設定の関所を通した後)。Phase 21b で分離した */
+static void enqueue_touch(bool down, int x, int y);
+
 void host_sdl_push_touch(bool down, int x, int y)
+{
+    /* **マスター設定の関所**(Phase 21b)。上端からの下スワイプで開く。
+     * 上端で始まった押下は結論が出るまで保留し、違ったら後から流す */
+    masterui_action_t a =
+        masterui_on_touch(down ? HOSTAPI_EV_TOUCH_DOWN : HOSTAPI_EV_TOUCH_UP, x, y);
+    if (a == MASTERUI_CONSUME || a == MASTERUI_HOLD) return;
+    if (a == MASTERUI_FLUSH_THEN_PASS) {
+        int hx, hy;
+        masterui_held_down(&hx, &hy);
+        enqueue_touch(true, hx, hy); /* 保留していた DOWN を先に流す */
+    }
+    enqueue_touch(down, x, y);
+}
+
+static void enqueue_touch(bool down, int x, int y)
 {
     /* アプリを起動したクリックの UP がアプリに漏れないように */
     if (!down && !s_down_delivered) return;
@@ -801,6 +838,13 @@ void host_sdl_push_touch_move(int x, int y)
 {
     int dx, dy;
     hostapi_event_t* tail;
+    masterui_action_t a = masterui_on_touch(HOSTAPI_EV_TOUCH_MOVE, x, y);
+    if (a == MASTERUI_CONSUME || a == MASTERUI_HOLD) return;
+    if (a == MASTERUI_FLUSH_THEN_PASS) {
+        int hx, hy;
+        masterui_held_down(&hx, &hy);
+        enqueue_touch(true, hx, hy);
+    }
 
     /* 押下中だけ出す(実機の LV_EVENT_PRESSING と同じ意味にする)。
      * SDL のボタンマスクではなく、自分が配送した DOWN/UP で判断するので、
@@ -1104,6 +1148,37 @@ void host_sdl_window_to_logical(int wx, int wy, int* lx, int* ly)
     *ly = wy;
 }
 
+/* マスター設定のオーバーレイ(Phase 21b)。
+ * **アプリのスロットを 1 つも使わず**、描画のいちばん最後に上から重ねる。
+ * 座標と当たり判定は shared/master_ui.h(両ホストで同じ) */
+static void draw_master_overlay(void)
+{
+    char buf[16];
+    int v, fill;
+    if (!masterui_is_open()) return;
+
+    /* 帯は不透明(全画面の半透明は毎フレームのブレンドが高いので使わない) */
+    host_sdl_rect(0, 0, SCREEN_W, MASTERUI_BAND_H, 0x1a2234);
+    host_sdl_rect(0, MASTERUI_BAND_H - 2, SCREEN_W, 2, 0x305090);
+    draw_string(12, 8, "Settings", 0xffffff);
+    draw_string(MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
+
+    draw_string(12, MASTERUI_VALUE_Y, "Volume", 0xffffff);
+    host_sdl_rect(MASTERUI_MINUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
+    draw_string(MASTERUI_MINUS_X + 18, MASTERUI_BTN_Y + 14, "-", 0xffffff);
+    host_sdl_rect(MASTERUI_PLUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
+    draw_string(MASTERUI_PLUS_X + 18, MASTERUI_BTN_Y + 14, "+", 0xffffff);
+
+    v = masterui_volume();
+    snprintf(buf, sizeof(buf), "%d", v);
+    draw_string(MASTERUI_VALUE_X, MASTERUI_VALUE_Y, buf, 0x40e070);
+
+    /* バー(要否は使ってから判断する。ユーザー指示) */
+    host_sdl_rect(MASTERUI_BAR_X, MASTERUI_BAR_Y, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
+    fill = MASTERUI_BAR_W * v / 100;
+    if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, MASTERUI_BAR_Y, fill, MASTERUI_BAR_H, 0x40e070);
+}
+
 void host_sdl_render(void)
 {
     SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
@@ -1123,6 +1198,8 @@ void host_sdl_render(void)
         const TextSlot* t = &s_texts[i];
         draw_string(t->x, t->y, t->text, t->rgb888);
     }
+
+    draw_master_overlay(); /* アプリより上。Phase 21b */
 
     SDL_RenderPresent(s_renderer);
 }
