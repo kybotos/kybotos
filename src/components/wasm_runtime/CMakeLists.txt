@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "wasm_runtime.cpp" "hostapi.cpp" "launcher.cpp" "screensaver.cpp"
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/master_ui.c"
     INCLUDE_DIRS "."
     EMBED_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/../../../wasm-apps/touch_demo/touch_demo.wasm"

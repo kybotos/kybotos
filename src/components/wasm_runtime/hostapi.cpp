@@ -5,6 +5,7 @@
 // スロット数は固定で、あふれたら警告ログを出して無視する(PoC 割り切り)。
 #include "hostapi.hpp"
 #include "hostapi_defs.h"
+#include "master_ui.h"   // Phase 21b: マスター設定(両ホスト共有)
 
 #include "wasm_export.h"
 #include "lvgl.h"
@@ -126,6 +127,93 @@ void push_event(uint16_t type, int16_t x, int16_t y)
     if (dropped) ESP_LOGW(TAG, "event queue full, dropped oldest");
 }
 
+// ---- マスター設定のオーバーレイ(Phase 21b)----
+//
+// **アプリの描画スロットを 1 つも使わない。** `lv_layer_top()` に直接置くので、
+// 画面遷移ではなく**アプリの上に重なる**(アプリは覆われたことを知らない)。
+// **どのオブジェクトも CLICKABLE にしない** — 入力は下のアプリスクリーンの
+// イベントコールバックで受け、当たり判定は shared/master_ui.c が持つ
+// (両ホストで同じ座標・同じ判定にするため)。
+
+lv_obj_t* s_mui_band = nullptr;
+lv_obj_t* s_mui_value = nullptr;
+lv_obj_t* s_mui_barfill = nullptr;
+
+lv_obj_t* mui_box(lv_obj_t* parent, int x, int y, int w, int h, uint32_t rgb)
+{
+    lv_obj_t* o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_bg_color(o, lv_color_hex(rgb), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    return o;
+}
+
+lv_obj_t* mui_label(lv_obj_t* parent, int x, int y, const char* txt, uint32_t rgb)
+{
+    lv_obj_t* l = lv_label_create(parent);
+    lv_obj_set_pos(l, x, y);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_color(l, lv_color_hex(rgb), 0);
+    lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+    return l;
+}
+
+void mui_update_value()
+{
+    if (!s_mui_value) return;
+    char buf[8];
+    const int v = masterui_volume();
+    snprintf(buf, sizeof(buf), "%d", v);
+    lv_label_set_text(s_mui_value, buf);
+    if (s_mui_barfill) {
+        int w = MASTERUI_BAR_W * v / 100;
+        lv_obj_set_width(s_mui_barfill, w > 0 ? w : 1);
+    }
+}
+
+void mui_build()
+{
+    if (s_mui_band) return;
+    lv_obj_t* top = lv_layer_top();
+    s_mui_band = mui_box(top, 0, 0, 320, MASTERUI_BAND_H, 0x1a2234);
+    mui_box(s_mui_band, 0, MASTERUI_BAND_H - 2, 320, 2, 0x305090);
+    mui_label(s_mui_band, 12, 8, "Settings", 0xffffff);
+    mui_label(s_mui_band, MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
+    mui_label(s_mui_band, 12, MASTERUI_VALUE_Y, "Volume", 0xffffff);
+    mui_box(s_mui_band, MASTERUI_MINUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
+    mui_label(s_mui_band, MASTERUI_MINUS_X + 18, MASTERUI_BTN_Y + 12, "-", 0xffffff);
+    mui_box(s_mui_band, MASTERUI_PLUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
+    mui_label(s_mui_band, MASTERUI_PLUS_X + 18, MASTERUI_BTN_Y + 12, "+", 0xffffff);
+    mui_box(s_mui_band, MASTERUI_BAR_X, MASTERUI_BAR_Y, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
+    s_mui_barfill =
+        mui_box(s_mui_band, MASTERUI_BAR_X, MASTERUI_BAR_Y, 1, MASTERUI_BAR_H, 0x40e070);
+    s_mui_value = mui_label(s_mui_band, MASTERUI_VALUE_X, MASTERUI_VALUE_Y, "0", 0x40e070);
+    mui_update_value();
+}
+
+void mui_destroy()
+{
+    if (!s_mui_band) return;
+    lv_obj_delete(s_mui_band); // 子ごと消える
+    s_mui_band = nullptr;
+    s_mui_value = nullptr;
+    s_mui_barfill = nullptr;
+}
+
+void mui_sync()
+{
+    if (masterui_is_open()) {
+        mui_build();
+        mui_update_value();
+    } else {
+        mui_destroy();
+    }
+}
+
 // アプリスクリーンの PRESSED/RELEASED(LVGL タスクから)
 void screen_input_event_cb(lv_event_t* e)
 {
@@ -135,15 +223,32 @@ void screen_input_event_cb(lv_event_t* e)
     lv_indev_get_point(indev, &p);
 
     const lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_PRESSED) {
-        push_event(HOSTAPI_EV_TOUCH_DOWN, (int16_t)p.x, (int16_t)p.y);
-    } else if (code == LV_EVENT_RELEASED) {
-        push_event(HOSTAPI_EV_TOUCH_UP, (int16_t)p.x, (int16_t)p.y);
-    } else if (code == LV_EVENT_PRESSING) {
-        // Phase 18a: 押下中の移動。LVGL の描画周期ごとに来るので、
-        // push_event 側の間引き(8px)と畳み込みでキューを守る
-        push_event(HOSTAPI_EV_TOUCH_MOVE, (int16_t)p.x, (int16_t)p.y);
+    uint16_t type;
+    if (code == LV_EVENT_PRESSED) type = HOSTAPI_EV_TOUCH_DOWN;
+    else if (code == LV_EVENT_RELEASED) type = HOSTAPI_EV_TOUCH_UP;
+    // Phase 18a: 押下中の移動。LVGL の描画周期ごとに来るので、
+    // push_event 側の間引き(8px)と畳み込みでキューを守る
+    else if (code == LV_EVENT_PRESSING) type = HOSTAPI_EV_TOUCH_MOVE;
+    else return;
+
+    // **マスター設定の関所**(Phase 21b)。上端からの下スワイプで開く。
+    // 上端で始まった押下は結論が出るまで保留し、違ったら後から流す。
+    // ここは LVGL タスク上なので、そのまま描画も更新できる
+    const masterui_action_t a = masterui_on_touch(type, (int)p.x, (int)p.y);
+    mui_sync();
+    if (a == MASTERUI_CONSUME || a == MASTERUI_HOLD) return;
+    if (a == MASTERUI_FLUSH_THEN_PASS) {
+        int hx = 0, hy = 0;
+        masterui_held_down(&hx, &hy);
+        push_event(HOSTAPI_EV_TOUCH_DOWN, (int16_t)hx, (int16_t)hy);
     }
+    push_event(type, (int16_t)p.x, (int16_t)p.y);
+}
+
+// `-` / `+` の長押し連打(LVGL タイマ = LVGL タスク上)
+void mui_timer_cb(lv_timer_t*)
+{
+    if (masterui_tick()) mui_update_value();
 }
 
 // ---- native implementations (wasm import "env") ----
@@ -733,9 +838,19 @@ void hostapi_audio_reset()
     seq::Reset();       // L0/L1 も初期状態へ (Phase 11)
 }
 
+// ---- マスター設定のフック(Phase 21b)----
+void mui_set_volume_cb(int v) { audio::Volume_adjustment((uint8_t)v); }
+uint32_t mui_now_ms_cb() { return (uint32_t)(esp_timer_get_time() / 1000); }
+const masterui_hooks_t kMasterUiHooks = { mui_set_volume_cb, mui_now_ms_cb };
+
 bool hostapi_register_natives()
 {
     tone_table_reset();
+    // マスター設定(Phase 21b)。音量はホストが持つのでアプリ起動では戻らない
+    masterui_init(&kMasterUiHooks, audio::Mp3Player::kDefaultVolume);
+    lvgl_port_lock(0);
+    lv_timer_create(mui_timer_cb, 50, nullptr);
+    lvgl_port_unlock();
     seq::SetClickHandler(seq_click_handler); // L0 の CLICK ポート (Phase 11)
     seq::SetSynthHandler(seq_synth_handler); // L0 の SYNTH ポート (Phase 21)
     if (!wasm_runtime_register_natives(
