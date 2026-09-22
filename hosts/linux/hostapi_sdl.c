@@ -117,8 +117,12 @@ static uint32_t s_voice_seq;
 static uint64_t s_audio_samples;   /* 再生済みフレーム数(音声クロック) */
 /* マスター音量の既定値(Phase 21b)。**実機の Mp3Player::kDefaultVolume と同じ値にすること**。
  * 98 は HW のつまみを最大にすると大きすぎたため 50 にした(暫定。実機の試聴で決める) */
-#define DEFAULT_MASTER_VOL 50
+#define DEFAULT_MASTER_VOL MASTERUI_DEF_MASTER
 static int s_master_vol = DEFAULT_MASTER_VOL;
+/* ポート単位のゲイン(Phase 21b 追記)。**実効音量 = マスター × チャンネル** */
+static int s_gain_mp3 = MASTERUI_DEF_MP3;
+static int s_gain_drum = MASTERUI_DEF_DRUM;
+static int s_gain_click = MASTERUI_DEF_CLICK;
 
 /* 発音要求のキュー(ロック下で積み、コールバックが取り出す)。
  * 単一の s_click_asap では、1 コールバックの間に来た複数の発音を落としてしまう */
@@ -171,7 +175,8 @@ static void voice_start_tone(const ToneDef* t)
     v->kind = VK_TONE;
     v->seq = ++s_voice_seq;
     voice_set_sine(v, (float)t->freq_hz, CLICK_RATE * t->dur_ms / 1000,
-                   12000.0f * t->level / 100.0f * s_master_vol / 100.0f);
+                   12000.0f * t->level / 100.0f * s_master_vol / 100.0f
+                       * s_gain_click / 100.0f);
 }
 
 /* SYNTH ポート。4 音とも「0-d の式」で作る。未知の note は何もしない。
@@ -180,7 +185,8 @@ static void voice_start_tone(const ToneDef* t)
  * クリック(12,000)が重なると振り切れるので **0.7 倍**にしてある。 */
 static void voice_start_drum(uint8_t note, uint8_t velocity)
 {
-    const float g = (float)velocity / 127.0f * (float)s_master_vol / 100.0f;
+    const float g = (float)velocity / 127.0f * (float)s_master_vol / 100.0f
+                    * (float)s_gain_drum / 100.0f;
     Voice* v = voice_alloc(note);
     if (!v) return;
     memset(v, 0, sizeof(*v));
@@ -584,21 +590,35 @@ int32_t native_hostapi_audio_ctrl(wasm_exec_env_t exec_env, int32_t cmd)
 }
 
 /* ---- マスター設定のフック(Phase 21b)---- */
-static void masterui_set_vol_cb(int v)
+static void apply_mp3_volume(void)
 {
-    if (s_audio) SDL_LockAudioDevice(s_audio);
-    s_master_vol = v;
-    if (s_audio) SDL_UnlockAudioDevice(s_audio);
 #ifdef HAVE_SDL_MIXER
-    if (s_mixer_ready) Mix_VolumeMusic(v * MIX_MAX_VOLUME / 100);
+    if (s_mixer_ready) {
+        const int eff = s_master_vol * s_gain_mp3 / 100;
+        Mix_VolumeMusic(eff * MIX_MAX_VOLUME / 100);
+    }
 #endif
 }
+
+static void masterui_set_level_cb(masterui_item_t item, int v)
+{
+    if (s_audio) SDL_LockAudioDevice(s_audio);
+    switch (item) {
+    case MASTERUI_MASTER: s_master_vol = v; break;
+    case MASTERUI_MP3:    s_gain_mp3 = v;   break;
+    case MASTERUI_DRUM:   s_gain_drum = v;  break;
+    case MASTERUI_CLICK:  s_gain_click = v; break;
+    default: break;
+    }
+    if (s_audio) SDL_UnlockAudioDevice(s_audio);
+    apply_mp3_volume();
+}
 static uint32_t masterui_now_cb(void) { return SDL_GetTicks() - s_start_ms; }
-static const masterui_hooks_t k_masterui_hooks = { masterui_set_vol_cb, masterui_now_cb };
+static const masterui_hooks_t k_masterui_hooks = { masterui_set_level_cb, masterui_now_cb };
 
 void host_sdl_masterui_init(void)
 {
-    masterui_init(&k_masterui_hooks, DEFAULT_MASTER_VOL);
+    masterui_init(&k_masterui_hooks);
 }
 
 void native_hostapi_audio_set_volume(wasm_exec_env_t exec_env, int32_t v)
@@ -610,6 +630,7 @@ void native_hostapi_audio_set_volume(wasm_exec_env_t exec_env, int32_t v)
     if (s_audio) {
         SDL_LockAudioDevice(s_audio);
         s_master_vol = v;
+        apply_mp3_volume();
         SDL_UnlockAudioDevice(s_audio);
     }
 #ifdef HAVE_SDL_MIXER
@@ -1163,20 +1184,22 @@ static void draw_master_overlay(void)
     draw_string(12, 8, "Settings", 0xffffff);
     draw_string(MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
 
-    draw_string(12, MASTERUI_VALUE_Y, "Volume", 0xffffff);
-    host_sdl_rect(MASTERUI_MINUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
-    draw_string(MASTERUI_MINUS_X + 18, MASTERUI_BTN_Y + 14, "-", 0xffffff);
-    host_sdl_rect(MASTERUI_PLUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
-    draw_string(MASTERUI_PLUS_X + 18, MASTERUI_BTN_Y + 14, "+", 0xffffff);
-
-    v = masterui_volume();
-    snprintf(buf, sizeof(buf), "%d", v);
-    draw_string(MASTERUI_VALUE_X, MASTERUI_VALUE_Y, buf, 0x40e070);
-
-    /* バー(要否は使ってから判断する。ユーザー指示) */
-    host_sdl_rect(MASTERUI_BAR_X, MASTERUI_BAR_Y, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
-    fill = MASTERUI_BAR_W * v / 100;
-    if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, MASTERUI_BAR_Y, fill, MASTERUI_BAR_H, 0x40e070);
+    for (int i = 0; i < MASTERUI_ITEMS; i++) {
+        const int ry = MASTERUI_ROW_Y(i);
+        const int ty = ry + 8;
+        draw_string(MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i), 0xffffff);
+        host_sdl_rect(MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
+        draw_string(MASTERUI_MINUS_X + 16, ty, "-", 0xffffff);
+        host_sdl_rect(MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
+        draw_string(MASTERUI_PLUS_X + 16, ty, "+", 0xffffff);
+        v = masterui_level((masterui_item_t)i);
+        snprintf(buf, sizeof(buf), "%d", v);
+        draw_string(MASTERUI_VALUE_X, ty, buf, 0x40e070);
+        /* バー(要否は使ってから判断する。ユーザー指示) */
+        host_sdl_rect(MASTERUI_BAR_X, ry + 10, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
+        fill = MASTERUI_BAR_W * v / 100;
+        if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, ry + 10, fill, MASTERUI_BAR_H, 0x40e070);
+    }
 }
 
 void host_sdl_render(void)

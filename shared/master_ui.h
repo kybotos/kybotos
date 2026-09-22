@@ -32,23 +32,44 @@
  * 閾値に届く前にジェスチャが死ぬ(Phase 18a と同じ罠) */
 #define MASTERUI_SIDE_SLACK_PX 12
 
+/* ---- 設定項目(Phase 21b。追記でミキサーを足した)----
+ *
+ * **実効音量 = マスター × チャンネル**(どちらも 0..100)。
+ * チャンネルは**ポート単位**で、`architecture.md` §7 のポート抽象とそろえてある。 */
+typedef enum {
+    MASTERUI_MASTER = 0, /* 全体 */
+    MASTERUI_MP3,        /* MP3 再生 */
+    MASTERUI_DRUM,       /* 内蔵音源(SYNTH ポート) */
+    MASTERUI_CLICK,      /* クリック(CLICK ポート) */
+    MASTERUI_ITEMS
+} masterui_item_t;
+
+/* 既定値。MP3 の実効は 50 * 0.35 = 17.5(実機の試聴で「18 くらい」だったのに合わせた) */
+#define MASTERUI_DEF_MASTER 50
+#define MASTERUI_DEF_MP3    35
+#define MASTERUI_DEF_DRUM   100
+#define MASTERUI_DEF_CLICK  100
+
 /* ---- オーバーレイの座標(論理 320x240)---- */
-#define MASTERUI_BAND_H   110
+#define MASTERUI_ROW0_Y   34   /* 1 行目の上端 */
+#define MASTERUI_ROW_PITCH 34
+#define MASTERUI_ROW_H    30
+#define MASTERUI_BAND_H   (MASTERUI_ROW0_Y + MASTERUI_ITEMS * MASTERUI_ROW_PITCH + 6)
 #define MASTERUI_CLOSE_X  284
 #define MASTERUI_CLOSE_Y  4
 #define MASTERUI_CLOSE_W  32
 #define MASTERUI_CLOSE_H  28
-#define MASTERUI_BTN_Y    40
-#define MASTERUI_BTN_W    44
-#define MASTERUI_BTN_H    40
-#define MASTERUI_MINUS_X  120
-#define MASTERUI_PLUS_X   216
-#define MASTERUI_VALUE_X  176
-#define MASTERUI_VALUE_Y  50
-#define MASTERUI_BAR_X    12
-#define MASTERUI_BAR_Y    88
-#define MASTERUI_BAR_W    296
+#define MASTERUI_LABEL_X  12
+#define MASTERUI_MINUS_X  90
+#define MASTERUI_PLUS_X   185
+#define MASTERUI_BTN_W    40
+#define MASTERUI_VALUE_X  142
+#define MASTERUI_BAR_X    235
+#define MASTERUI_BAR_W    75
 #define MASTERUI_BAR_H    10
+
+/* 行 i の上端 y */
+#define MASTERUI_ROW_Y(i) (MASTERUI_ROW0_Y + (i) * MASTERUI_ROW_PITCH)
 
 /* ---- 長押し連打加速(metronome の BPM± と同じ。Phase 7D の実績値)---- */
 #define MASTERUI_HOLD_DELAY_MS   500
@@ -75,17 +96,20 @@ typedef enum {
 } masterui_action_t;
 
 typedef struct {
-    /* 音量をホストへ反映する(0..100) */
-    void (*set_volume)(int v);
+    /* 設定項目の値をホストへ反映する(0..100)。起動時と変更時に呼ばれる */
+    void (*set_level)(masterui_item_t item, int v);
     /* 起動からの経過ミリ秒 */
     uint32_t (*now_ms)(void);
 } masterui_hooks_t;
 
-/* 起動時に 1 回。hooks は静的寿命であること。volume は現在のマスター音量 */
-void masterui_init(const masterui_hooks_t *hooks, int volume);
+/* 起動時に 1 回。hooks は静的寿命であること。既定値がそのままホストへ反映される */
+void masterui_init(const masterui_hooks_t *hooks);
 
 bool masterui_is_open(void);
-int  masterui_volume(void);
+/* 項目の値(範囲外は 0) */
+int  masterui_level(masterui_item_t item);
+/* 画面に出すラベル(ASCII) */
+const char *masterui_label(masterui_item_t item);
 /* 保留中の DOWN の座標(MASTERUI_FLUSH_THEN_PASS のときにホストが使う) */
 void masterui_held_down(int *x, int *y);
 

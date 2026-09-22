@@ -182,6 +182,10 @@ uint32_t s_voice_seq;
 int32_t s_acc[kMixBlock];
 int16_t s_chunk[kMixBlock * 2];
 
+// ミキサ側が使うポート別ゲイン(Mp3Player::set_gain が写す。Phase 21b)
+int s_gain_drum = 100;
+int s_gain_click = 100;
+
 bool s_mixer_suspended; // ログを状態変化のときだけ出すための記録
 
 void voice_set_sine(Voice* v, float freq, int frames, float amp)
@@ -222,14 +226,15 @@ void voice_start_tone(const Mp3Player::ToneMsg& t, int master_vol)
     v->kind = VK_TONE;
     v->seq = ++s_voice_seq;
     voice_set_sine(v, (float)t.freq_hz, kMixRate * t.dur_ms / 1000,
-                   12000.0f * t.level / 100.0f * master_vol / 100.0f);
+                   12000.0f * t.level / 100.0f * master_vol / 100.0f * s_gain_click / 100.0f);
 }
 
 // 基準レベルは **4 音同時 + クリックでクリップしない**ように決めた
 // (Linux の WAV で実測。4 音同時のピーク 19,839 / -4.3dBFS)
 void voice_start_drum(uint8_t note, uint8_t velocity, int master_vol)
 {
-    const float g = (float)velocity / 127.0f * (float)master_vol / 100.0f;
+    const float g = (float)velocity / 127.0f * (float)master_vol / 100.0f
+                    * (float)s_gain_drum / 100.0f;
     Voice* v = voice_alloc(note);
     if (!v) return;
     memset(v, 0, sizeof(*v));
@@ -345,6 +350,14 @@ bool Mp3Player::play_drum(uint8_t note, uint8_t velocity) noexcept {
     if (!tone_queue_) return false;
     ToneMsg msg{0, 0, 0, note, velocity};
     return xQueueSend(tone_queue_, &msg, 0) == pdTRUE;
+}
+
+void Mp3Player::set_gain(uint8_t mp3, uint8_t drum, uint8_t click) noexcept {
+    gain_mp3_.store(mp3);
+    gain_drum_.store(drum);
+    gain_click_.store(click);
+    s_gain_drum = drum;
+    s_gain_click = click;
 }
 
 void Mp3Player::synth_reset() noexcept {
@@ -554,7 +567,8 @@ esp_err_t Mp3Player::write_fn(void* audio_buffer, size_t len, size_t* bytes_writ
     if (!s_self) return ESP_FAIL;
     int16_t* samples = static_cast<int16_t*>(audio_buffer);
     size_t sample_count = len / sizeof(int16_t);
-    float volume_factor = (float)s_self->volume_.load() / 100.0f;
+    float volume_factor = (float)s_self->volume_.load() / 100.0f
+                          * (float)s_self->gain_mp3_.load() / 100.0f;
     for (size_t i = 0; i < sample_count; ++i) {
         int32_t v = (int32_t)std::lround((float)samples[i] * volume_factor);
         if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
@@ -712,6 +726,10 @@ extern "C" bool Play_Drum(uint8_t note, uint8_t velocity) {
 
 extern "C" void Synth_Reset(void) {
     if (g_player) g_player->synth_reset();
+}
+
+extern "C" void Set_Port_Gain(uint8_t mp3, uint8_t drum, uint8_t click) {
+    if (g_player) g_player->set_gain(mp3, drum, click);
 }
 
 extern "C" void Play_Music(const char* directory, const char* fileName) {

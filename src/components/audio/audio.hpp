@@ -69,6 +69,11 @@ public:
     // 鳴っているボイスを消す(transport 停止 / アプリ破棄)。
     void synth_reset() noexcept;
 
+    // ポート単位のゲイン(Phase 21b の追記)。**実効音量 = マスター × チャンネル**。
+    // 内蔵スピーカーでは MP3 だけが大きすぎたので、既定でチャンネルごとに差を付ける
+    void set_gain(uint8_t mp3, uint8_t drum, uint8_t click) noexcept;
+    uint8_t gain_mp3() const noexcept { return gain_mp3_.load(); }
+
     // Start playback of a file via audio_player when available (fallback stubs otherwise)
     bool play_file(const std::string& path) noexcept;
     void pause() noexcept;
@@ -107,6 +112,10 @@ private:
     // マスター音量の既定値(Phase 21b)。**装置の設定**なのでアプリ起動では戻らない。
     // 98 は HW のつまみを最大にすると大きすぎたため 50 にした(暫定。実機の試聴で決める)
     std::atomic<uint8_t> volume_{kDefaultVolume};
+    // ポート単位のゲイン(Phase 21b)。既定は shared/master_ui.h と同じ値
+    std::atomic<uint8_t> gain_mp3_{35};
+    std::atomic<uint8_t> gain_drum_{100};
+    std::atomic<uint8_t> gain_click_{100};
 
     // I2S チャネルが有効か (Phase 21)。再構成が途中で失敗しても無効のまま
     // 放置しないための記録。false なら次の書き込み前に作り直す。
@@ -145,6 +154,7 @@ extern "C" {
     bool Play_Tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level); // 減衰サイン (7C)
     bool Play_Drum(uint8_t note, uint8_t velocity);  // 内蔵音源 (Phase 21)
     void Synth_Reset(void);                          // 鳴っている音を消す (Phase 21)
+    void Set_Port_Gain(uint8_t mp3, uint8_t drum, uint8_t click); // ポート別ゲイン (Phase 21b)
     void Play_Music(const char* directory, const char* fileName);
     void Music_resume(void);
     void Music_pause(void);

@@ -136,8 +136,8 @@ void push_event(uint16_t type, int16_t x, int16_t y)
 // (両ホストで同じ座標・同じ判定にするため)。
 
 lv_obj_t* s_mui_band = nullptr;
-lv_obj_t* s_mui_value = nullptr;
-lv_obj_t* s_mui_barfill = nullptr;
+lv_obj_t* s_mui_value[MASTERUI_ITEMS] = {};
+lv_obj_t* s_mui_barfill[MASTERUI_ITEMS] = {};
 
 lv_obj_t* mui_box(lv_obj_t* parent, int x, int y, int w, int h, uint32_t rgb)
 {
@@ -164,14 +164,17 @@ lv_obj_t* mui_label(lv_obj_t* parent, int x, int y, const char* txt, uint32_t rg
 
 void mui_update_value()
 {
-    if (!s_mui_value) return;
-    char buf[8];
-    const int v = masterui_volume();
-    snprintf(buf, sizeof(buf), "%d", v);
-    lv_label_set_text(s_mui_value, buf);
-    if (s_mui_barfill) {
-        int w = MASTERUI_BAR_W * v / 100;
-        lv_obj_set_width(s_mui_barfill, w > 0 ? w : 1);
+    if (!s_mui_band) return;
+    for (int i = 0; i < MASTERUI_ITEMS; i++) {
+        if (!s_mui_value[i]) continue;
+        char buf[8];
+        const int v = masterui_level((masterui_item_t)i);
+        snprintf(buf, sizeof(buf), "%d", v);
+        lv_label_set_text(s_mui_value[i], buf);
+        if (s_mui_barfill[i]) {
+            const int w = MASTERUI_BAR_W * v / 100;
+            lv_obj_set_width(s_mui_barfill[i], w > 0 ? w : 1);
+        }
     }
 }
 
@@ -183,15 +186,19 @@ void mui_build()
     mui_box(s_mui_band, 0, MASTERUI_BAND_H - 2, 320, 2, 0x305090);
     mui_label(s_mui_band, 12, 8, "Settings", 0xffffff);
     mui_label(s_mui_band, MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
-    mui_label(s_mui_band, 12, MASTERUI_VALUE_Y, "Volume", 0xffffff);
-    mui_box(s_mui_band, MASTERUI_MINUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
-    mui_label(s_mui_band, MASTERUI_MINUS_X + 18, MASTERUI_BTN_Y + 12, "-", 0xffffff);
-    mui_box(s_mui_band, MASTERUI_PLUS_X, MASTERUI_BTN_Y, MASTERUI_BTN_W, MASTERUI_BTN_H, 0x2a3340);
-    mui_label(s_mui_band, MASTERUI_PLUS_X + 18, MASTERUI_BTN_Y + 12, "+", 0xffffff);
-    mui_box(s_mui_band, MASTERUI_BAR_X, MASTERUI_BAR_Y, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
-    s_mui_barfill =
-        mui_box(s_mui_band, MASTERUI_BAR_X, MASTERUI_BAR_Y, 1, MASTERUI_BAR_H, 0x40e070);
-    s_mui_value = mui_label(s_mui_band, MASTERUI_VALUE_X, MASTERUI_VALUE_Y, "0", 0x40e070);
+    for (int i = 0; i < MASTERUI_ITEMS; i++) {
+        const int ry = MASTERUI_ROW_Y(i);
+        const int ty = ry + 6;
+        mui_label(s_mui_band, MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i), 0xffffff);
+        mui_box(s_mui_band, MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
+        mui_label(s_mui_band, MASTERUI_MINUS_X + 16, ty, "-", 0xffffff);
+        mui_box(s_mui_band, MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
+        mui_label(s_mui_band, MASTERUI_PLUS_X + 16, ty, "+", 0xffffff);
+        mui_box(s_mui_band, MASTERUI_BAR_X, ry + 10, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
+        s_mui_barfill[i] =
+            mui_box(s_mui_band, MASTERUI_BAR_X, ry + 10, 1, MASTERUI_BAR_H, 0x40e070);
+        s_mui_value[i] = mui_label(s_mui_band, MASTERUI_VALUE_X, ty, "0", 0x40e070);
+    }
     mui_update_value();
 }
 
@@ -200,8 +207,10 @@ void mui_destroy()
     if (!s_mui_band) return;
     lv_obj_delete(s_mui_band); // 子ごと消える
     s_mui_band = nullptr;
-    s_mui_value = nullptr;
-    s_mui_barfill = nullptr;
+    for (int i = 0; i < MASTERUI_ITEMS; i++) {
+        s_mui_value[i] = nullptr;
+        s_mui_barfill[i] = nullptr;
+    }
 }
 
 void mui_sync()
@@ -839,15 +848,25 @@ void hostapi_audio_reset()
 }
 
 // ---- マスター設定のフック(Phase 21b)----
-void mui_set_volume_cb(int v) { audio::Volume_adjustment((uint8_t)v); }
+// **実効音量 = マスター × チャンネル。** チャンネルはポート単位(MP3 / 内蔵音源 / クリック)
+void mui_set_level_cb(masterui_item_t item, int v)
+{
+    if (item == MASTERUI_MASTER) {
+        audio::Volume_adjustment((uint8_t)v);
+        return;
+    }
+    audio::Set_Port_Gain((uint8_t)masterui_level(MASTERUI_MP3),
+                         (uint8_t)masterui_level(MASTERUI_DRUM),
+                         (uint8_t)masterui_level(MASTERUI_CLICK));
+}
 uint32_t mui_now_ms_cb() { return (uint32_t)(esp_timer_get_time() / 1000); }
-const masterui_hooks_t kMasterUiHooks = { mui_set_volume_cb, mui_now_ms_cb };
+const masterui_hooks_t kMasterUiHooks = { mui_set_level_cb, mui_now_ms_cb };
 
 bool hostapi_register_natives()
 {
     tone_table_reset();
     // マスター設定(Phase 21b)。音量はホストが持つのでアプリ起動では戻らない
-    masterui_init(&kMasterUiHooks, audio::Mp3Player::kDefaultVolume);
+    masterui_init(&kMasterUiHooks);
     lvgl_port_lock(0);
     lv_timer_create(mui_timer_cb, 50, nullptr);
     lvgl_port_unlock();
