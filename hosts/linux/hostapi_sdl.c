@@ -1172,6 +1172,7 @@ void host_sdl_window_to_logical(int wx, int wy, int* lx, int* ly)
 /* マスター設定のオーバーレイ(Phase 21b)。
  * **アプリのスロットを 1 つも使わず**、描画のいちばん最後に上から重ねる。
  * 座標と当たり判定は shared/master_ui.h(両ホストで同じ) */
+void draw_master_overlay_if_open(void);
 static void draw_master_overlay(void)
 {
     char buf[16];
@@ -1201,6 +1202,8 @@ static void draw_master_overlay(void)
         if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, ry + 10, fill, MASTERUI_BAR_H, 0x40e070);
     }
 }
+
+void draw_master_overlay_if_open(void) { draw_master_overlay(); }
 
 void host_sdl_render(void)
 {

@@ -33,6 +33,8 @@
 #define MAX_APPS 32
 
 /* メニューレイアウト(320x240 論理座標) */
+/* メニューのいちばん上に置く `Settings` の行(Phase 21b)。アプリの index とは別物 */
+#define MENU_SETTINGS_ROW (-2)
 #define MENU_ROW_X 10
 #define MENU_ROW_W 300
 #define MENU_ROW_Y0 32
@@ -269,8 +271,13 @@ static void menu_render(int hover)
     host_sdl_begin_frame(0x101418);
     host_sdl_text(10, 10, title, 0xffffff);
 
+    /* いちばん上に `Settings`(Phase 21b)。上端スワイプが使えない場面の受け皿 */
+    host_sdl_rect(MENU_ROW_X, MENU_ROW_Y0, MENU_ROW_W, MENU_ROW_H,
+                  (hover == MENU_SETTINGS_ROW) ? 0x4060a0 : 0x305090);
+    host_sdl_text(MENU_ROW_X + 8, MENU_ROW_Y0 + 2, "Settings", 0xffffff);
+
     for (int i = 0; i < s_app_count; i++) {
-        const int y = MENU_ROW_Y0 + i * (MENU_ROW_H + MENU_ROW_GAP);
+        const int y = MENU_ROW_Y0 + (i + 1) * (MENU_ROW_H + MENU_ROW_GAP);
         if (y + MENU_ROW_H > MENU_STATUS_Y) break; /* あふれは表示しない(PoC) */
         host_sdl_rect(MENU_ROW_X, y, MENU_ROW_W, MENU_ROW_H,
                       (i == hover) ? 0x3a4a60 : 0x2a3340);
@@ -278,14 +285,16 @@ static void menu_render(int hover)
     }
 
     host_sdl_text(10, MENU_STATUS_Y, s_status, 0x90a0b0);
+    draw_master_overlay_if_open();
     host_sdl_present();
 }
 
 static int menu_hit_test(int lx, int ly)
 {
     if (lx < MENU_ROW_X || lx >= MENU_ROW_X + MENU_ROW_W) return -1;
+    if (ly >= MENU_ROW_Y0 && ly < MENU_ROW_Y0 + MENU_ROW_H) return MENU_SETTINGS_ROW;
     for (int i = 0; i < s_app_count; i++) {
-        const int y = MENU_ROW_Y0 + i * (MENU_ROW_H + MENU_ROW_GAP);
+        const int y = MENU_ROW_Y0 + (i + 1) * (MENU_ROW_H + MENU_ROW_GAP);
         if (ly >= y && ly < y + MENU_ROW_H) return i;
     }
     return -1;
@@ -401,7 +410,12 @@ int main(int argc, char** argv)
                     int lx, ly;
                     host_sdl_window_to_logical(ev.button.x, ev.button.y, &lx, &ly);
                     int idx = menu_hit_test(lx, ly);
-                    if (idx >= 0) {
+                    if (idx == MENU_SETTINGS_ROW) {
+                        masterui_open(); /* Phase 21b */
+                    } else if (masterui_is_open()) {
+                        /* 開いている間はメニューの行を押させない(帯の内外で判定) */
+                        masterui_on_touch(HOSTAPI_EV_TOUCH_DOWN, lx, ly);
+                    } else if (idx >= 0) {
                         if (app_load(s_apps[idx].path, &app)) {
                             app_running = true;
                         }

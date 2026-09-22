@@ -1,10 +1,18 @@
 #pragma once
 
+#include "lvgl.h"   // Phase 21b: メニュー画面に判定を付けるため
+
 namespace wasmrt {
 
 // ホスト API (module "env") を WAMR に登録する。wasm_runtime_full_init 後、
 // instantiate より前に呼ぶこと(runtime_init() が呼ぶ)。
 bool hostapi_register_natives();
+
+// マスター設定を開く(Phase 21b。メニューの `Settings` 行から)
+void hostapi_masterui_open();
+
+// メニュー画面に上端スワイプの判定を付ける(Phase 21b)
+void hostapi_masterui_attach_menu(lv_obj_t* menu_screen);
 
 // アプリ用の LVGL スクリーンを新規作成してアクティブにする(スロットも初期化)。
 // アプリ起動直前に呼ぶ。LVGL タスクまたは lvgl_port_lock 下から。

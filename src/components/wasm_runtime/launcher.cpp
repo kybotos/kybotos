@@ -99,6 +99,14 @@ bool has_wasm_ext(const char* name)
     return strcasecmp(ext, ".wasm") == 0;
 }
 
+// メニューの `Settings` 行(Phase 21b)。**上端スワイプが使えない場面の受け皿**
+// (メニューではアプリスクリーンが無いのでスワイプの関所が働かない。
+//  ブラウザ版では上端スワイプを OS / ブラウザが先に取るので、そちらでも受け皿になる)
+void settings_row_event_cb(lv_event_t*)
+{
+    wasmrt::hostapi_masterui_open();
+}
+
 // メニューの行タップ → アプリ起動(LVGL タスクから呼ばれる)
 void row_event_cb(lv_event_t* e)
 {
@@ -149,12 +157,24 @@ void create_menu_locked()
 
     // 無操作時のスクリーンセーバー/消灯(このメニュー画面のときだけ働く)
     wasmrt::screensaver_attach(s_menu_screen);
+    wasmrt::hostapi_masterui_attach_menu(s_menu_screen); // Phase 21b
 }
 
 // lvgl_port_lock 下で呼ぶこと。kAppsDir を読み直して行を作る。
 void rebuild_list_locked()
 {
     lv_obj_clean(s_list_cont);
+
+    // **いちばん上に `Settings`**(アプリの一覧より前。Phase 21b)
+    {
+        lv_obj_t* row = lv_button_create(s_list_cont);
+        lv_obj_set_width(row, lv_pct(100));
+        lv_obj_set_style_bg_color(row, lv_color_hex(0x305090), 0);
+        lv_obj_t* label = lv_label_create(row);
+        lv_label_set_text(label, "Settings");
+        lv_obj_center(label);
+        lv_obj_add_event_cb(row, settings_row_event_cb, LV_EVENT_CLICKED, nullptr);
+    }
 
     DIR* dir = opendir(wasmrt::kAppsDir);
     if (!dir) {

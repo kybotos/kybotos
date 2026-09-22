@@ -135,6 +135,9 @@ void push_event(uint16_t type, int16_t x, int16_t y)
 // イベントコールバックで受け、当たり判定は shared/master_ui.c が持つ
 // (両ホストで同じ座標・同じ判定にするため)。
 
+// 開いている間、**全画面のキャッチャ**で入力を受ける。
+// これが無いと、メニュー画面では下のボタンが押されてしまう(帯は CLICKABLE にしないため)
+lv_obj_t* s_mui_catch = nullptr;
 lv_obj_t* s_mui_band = nullptr;
 lv_obj_t* s_mui_value[MASTERUI_ITEMS] = {};
 lv_obj_t* s_mui_barfill[MASTERUI_ITEMS] = {};
@@ -178,11 +181,25 @@ void mui_update_value()
     }
 }
 
+void mui_input_cb(lv_event_t* e);
+
 void mui_build()
 {
     if (s_mui_band) return;
     lv_obj_t* top = lv_layer_top();
-    s_mui_band = mui_box(top, 0, 0, 320, MASTERUI_BAND_H, 0x1a2234);
+    // 透明だが **CLICKABLE** な全画面のキャッチャ。開いている間の入力はすべてここで受ける
+    s_mui_catch = lv_obj_create(top);
+    lv_obj_remove_style_all(s_mui_catch);
+    lv_obj_set_pos(s_mui_catch, 0, 0);
+    lv_obj_set_size(s_mui_catch, 320, 240);
+    lv_obj_set_style_bg_opa(s_mui_catch, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(s_mui_catch, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(s_mui_catch, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_mui_catch, mui_input_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(s_mui_catch, mui_input_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(s_mui_catch, mui_input_cb, LV_EVENT_PRESSING, nullptr);
+
+    s_mui_band = mui_box(s_mui_catch, 0, 0, 320, MASTERUI_BAND_H, 0x1a2234);
     mui_box(s_mui_band, 0, MASTERUI_BAND_H - 2, 320, 2, 0x305090);
     mui_label(s_mui_band, 12, 8, "Settings", 0xffffff);
     mui_label(s_mui_band, MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
@@ -204,8 +221,9 @@ void mui_build()
 
 void mui_destroy()
 {
-    if (!s_mui_band) return;
-    lv_obj_delete(s_mui_band); // 子ごと消える
+    if (!s_mui_catch) return;
+    lv_obj_delete(s_mui_catch); // 帯も子ごと消える
+    s_mui_catch = nullptr;
     s_mui_band = nullptr;
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         s_mui_value[i] = nullptr;
@@ -221,6 +239,41 @@ void mui_sync()
     } else {
         mui_destroy();
     }
+}
+
+// LVGL のイベントを masterui の型へ。対象外なら false
+bool mui_event_type(lv_event_t* e, uint16_t* type, lv_point_t* p)
+{
+    lv_indev_t* indev = lv_event_get_indev(e);
+    if (!indev) return false;
+    lv_indev_get_point(indev, p);
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) *type = HOSTAPI_EV_TOUCH_DOWN;
+    else if (code == LV_EVENT_RELEASED) *type = HOSTAPI_EV_TOUCH_UP;
+    else if (code == LV_EVENT_PRESSING) *type = HOSTAPI_EV_TOUCH_MOVE;
+    else return false;
+    return true;
+}
+
+// 開いている間のキャッチャ。**アプリへは一切配送しない**
+void mui_input_cb(lv_event_t* e)
+{
+    uint16_t type;
+    lv_point_t p;
+    if (!mui_event_type(e, &type, &p)) return;
+    masterui_on_touch(type, (int)p.x, (int)p.y);
+    mui_sync();
+}
+
+// メニュー画面の入力(Phase 21b)。**上端スワイプの判定だけ**を通す。
+// メニューにはアプリが無いので、配送もしないしボタンの動作も邪魔しない
+void menu_input_event_cb(lv_event_t* e)
+{
+    uint16_t type;
+    lv_point_t p;
+    if (!mui_event_type(e, &type, &p)) return;
+    masterui_on_touch(type, (int)p.x, (int)p.y);
+    mui_sync();
 }
 
 // アプリスクリーンの PRESSED/RELEASED(LVGL タスクから)
@@ -861,6 +914,21 @@ void mui_set_level_cb(masterui_item_t item, int v)
 }
 uint32_t mui_now_ms_cb() { return (uint32_t)(esp_timer_get_time() / 1000); }
 const masterui_hooks_t kMasterUiHooks = { mui_set_level_cb, mui_now_ms_cb };
+
+// メニューの `Settings` 行から開く(Phase 21b)。LVGL タスク上から呼ぶこと
+void hostapi_masterui_attach_menu(lv_obj_t* menu_screen)
+{
+    if (!menu_screen) return;
+    lv_obj_add_event_cb(menu_screen, menu_input_event_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(menu_screen, menu_input_event_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(menu_screen, menu_input_event_cb, LV_EVENT_PRESSING, nullptr);
+}
+
+void hostapi_masterui_open()
+{
+    masterui_open();
+    mui_sync();
+}
 
 bool hostapi_register_natives()
 {
