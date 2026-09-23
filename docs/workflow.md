@@ -318,6 +318,17 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
   **タッチ・電源キーの既存操作系は変更していない。**
 - アプリ内 UI 操作(metronome の START/STOP 等)は自動化していない。音・画面の
   確認は §3.3 の人間操作+カメラのまま。
+- **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
+  (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
+  取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
+  `MBCMD: ready` の後にシリアルから `run <app>` を 1 回だけ送る**(Phase 21c で sequencer をこの形で測った)。
+  ```bash
+  ./scripts/hpane.sh send esp32-monitor "<§3.2 のモニタ起動コマンド(tee 先は captures/<タスク名>/pool.log)>"
+  # ログファイルに `MBCMD: ready` が出るのを待ってから
+  ./scripts/hpane.sh send esp32-monitor "run sequencer"
+  grep -a "wamr pool" captures/<タスク名>/pool.log   # total / free / highmark
+  ./scripts/hpane.sh send esp32-monitor "stop"
+  ```
 
 **待ち方(§1-2 の趣旨の強化)**: 本スクリプトの完了待ちは、herdr のペイン出力では
 なく **`tee` が書くログファイルの「今回の待ちを始めた行より後ろ」** に対して行う。
@@ -473,6 +484,8 @@ grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録
 
 - **しきい値交差だけのオンセット検出はノイズ系の音で誤検出する**(減衰するノイズが
   しきい値を何度も往復する)。**30ms 程度の不応期**を入れること。
+- **1 音の長さは「オンセットから包絡線が最初にピークの 5% を下回った時刻」で測る**(Phase 21c)。
+  「最後に 5% を超えていた時刻」で測ると**次の拍まで拾う**(120bpm の 55ms の音が 1 秒と出た)。
 
 **実機: カメラ録音 → WAV 抽出 → 同じ判定**
 
