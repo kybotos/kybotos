@@ -103,6 +103,14 @@ docs/results/)。
 - 実施結果は `docs/results/<対応するファイル>.md` に追記(冒頭に対応する指示書への
   参照)。ファイルが無ければ `docs/prompts/` の指示書名に対応させて新規作成する。
 - キャプチャは `captures/<タスク名>/` に置き、`git status` に現れないことを確認。
+- **検証に使ったスクリプトは `scripts/` に置いてコミットする**(Phase 21d でユーザー決定)。
+  一時ディレクトリ(scratchpad)に置いたまま済ませない。実施記録に書いた数値を後から出し直せるようにするため。
+  - **ファイル名**: シェルは `kebab-case.sh`、Python は `snake_case.py`(`import` できるように)。
+    **特定のアプリに依存するものは名前にアプリ名を入れる**(例 `sequencer-drum-wav.sh`)。
+  - **冒頭のコメント**に、用途・使い方(引数)・どの手順(本書の節)の一部か・作ったフェーズを書く。
+  - **ホストを起動するスクリプトは、ホストを自分の子として起動する**(`hpane.sh send` でペインへ送らない)。
+    スクリプト自体を `hpane.sh run` で走らせると、send が**自分を走らせているペインに割り込む**ため。
+  - 画面の座標など**アプリのレイアウトに依存する値**は、スクリプトの冒頭に前提として書いておく(レイアウトが変わったら直す)。
 
 ## §3 推奨手順(既定の具体的なやり方)
 
@@ -318,6 +326,13 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
   **タッチ・電源キーの既存操作系は変更していない。**
 - アプリ内 UI 操作(metronome の START/STOP 等)は自動化していない。音・画面の
   確認は §3.3 の人間操作+カメラのまま。
+- **手で起動したモニタが残ったまま走らせない。** スクリプトはポートを掴んだコンテナを kill してから
+  `esp32-monitor` ペインへ新しいモニタの起動コマンドを送るが、**ペインがまだ前のモニタに繋がっていると、
+  そのコマンドが実機のシリアル入力に流れる**(実機ログに `MBCMD: err unknown command ...`、
+  回帰は「serial command console did not come up」で FAIL。Phase 21d で 1 回踏んだ)。
+  **先に `docker kill <モニタのコンテナ>` し、`hpane.sh read esp32-monitor` でプロンプトに戻ったのを見てから**走らせる。
+  止めるコンテナは **MidiAppBox のイメージに絞る**(`docker ps -q --filter ancestor=<§3.2 のイメージ>`)。
+  `docker ps -q` 全部を kill しない(無関係のコンテナまで止まる)。
 - **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
   (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
   取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
@@ -329,6 +344,8 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
   grep -a "wamr pool" captures/<タスク名>/pool.log   # total / free / highmark
   ./scripts/hpane.sh send esp32-monitor "stop"
   ```
+  この手順は **`scripts/device-pool.sh <タスク名> <app>`** にまとめてある(Phase 21d。実行中の `heap` も取る)。
+  **終わった後もモニタは `esp32-monitor` ペインに残る**ので、続けて回帰を走らせる前に止めること(上の注意)。
 
 **待ち方(§1-2 の趣旨の強化)**: 本スクリプトの完了待ちは、herdr のペイン出力では
 なく **`tee` が書くログファイルの「今回の待ちを始めた行より後ろ」** に対して行う。
@@ -424,6 +441,16 @@ DISPLAY=:0 xdotool click --window "$WIN" 1
 
 - 撮影のタイミングを ms で待つときは `sleep "$(printf '%d.%03d' $((ms/1000)) $((ms%1000)))"`。
   `sleep 0.$(printf %03d $ms)` は 1,000ms を超えると桁が崩れる(Phase 18 で撮り逃した)。
+- **タップ・長押し・ドラッグ・キー・撮影は `scripts/ui-linux.sh` にまとめてある**(Phase 21d)。座標は論理座標(320×240)で渡す。
+  ```bash
+  ./scripts/ui-linux.sh tap 100 168             # 合成クリック
+  ./scripts/ui-linux.sh hold 150 90 900         # 長押し(900ms 押して離す)
+  ./scripts/ui-linux.sh drag 150 90 80 0 0      # 押してすぐ右へ 80px(スワイプ / 編集状態のドラッグ)
+  ./scripts/ui-linux.sh drag 150 90 0 -48 900   # 長押しが成立してから上へ 48px(長押し + ドラッグ)
+  UI_CAPTURE_DIR=captures/<タスク名> ./scripts/ui-linux.sh shot <名前>
+  ```
+  **ドラッグは実ポインタを動かす**ので、スクリプトが毎回クライアント原点を較正してから絶対座標で動かす(`docs/lessons.md` Phase 21b)。
+  **点滅は 1 枚では判定できない**ので、数枚撮って同じ画素を並べる(`convert <png> -format '%[pixel:p{x,y}]' info:`)。
 
 ### 3.7 Linux ホストの回帰(6 本)(Phase 20 で明文化)
 
@@ -431,7 +458,13 @@ DISPLAY=:0 xdotool click --window "$WIN" 1
 対象は `scripts/device-regress.conf` の `APPS` と同じ 6 本
 (touch_demo / mp3player / metronome / midi_loopback / seq_smoke / sequencer)。
 
-各アプリについて次を順に行う(短いループを書いて回してよい。スクリプトは `scripts/` に置いていない):
+**`scripts/linux-regress.sh <タスク名>` が以下をそのまま回す**(Phase 21d。全 PASS で exit 0、1 行 1 アプリで highmark も出す):
+
+```bash
+./scripts/hpane.sh run unix-build "<repo>/scripts/linux-regress.sh <タスク名>" 300000
+```
+
+手で回すときは、各アプリについて次を順に行う:
 
 ```bash
 # 1) 起動。**出力はログファイルへ**(ペインのスクロールバックに誤マッチさせないため)
@@ -486,6 +519,26 @@ grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録
   しきい値を何度も往復する)。**30ms 程度の不応期**を入れること。
 - **1 音の長さは「オンセットから包絡線が最初にピークの 5% を下回った時刻」で測る**(Phase 21c)。
   「最後に 5% を超えていた時刻」で測ると**次の拍まで拾う**(120bpm の 55ms の音が 1 秒と出た)。
+
+**打点が期待どおりの時刻に鳴っているか(Phase 21d)**: `scripts/wav_onsets.py` が、検出したオンセットを
+**小節ごとの拍子と打点から計算した期待時刻**と突き合わせ、一致 / 抜け / 余分 / 最大誤差を出す。
+
+```bash
+python3 scripts/wav_onsets.py captures/<タスク名>/out.wav 120 "4/4:0,8|3/4:4,8"   # 小節ごとに「拍子:鳴るステップ」
+python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24                  # 途切れない音(全ステップ ON など)
+./scripts/sequencer-drum-wav.sh <タスク名> <Drum 一覧の行> <名前> <秒>            # sequencer のクリップを RPT ON で録る
+```
+
+- **期待時刻との突き合わせは「直前に一致した発音」を基準に追従させる。** Linux の WAV の時計は約 0.2% 進み、
+  10 秒で 18ms ずれて固定の許容幅(±15ms)を超える。
+- **録音側でオーディオのバッファが 1 つ落ち、以降が約 23ms 詰まることがある**(アプリの打点の予約とは無関係)。
+  スクリプトは ±40ms まで広げて拾い、**「jumps (recording side)」として別に報告する**。跳びの後も間隔がそろっていれば正常。
+- **不応期はステップ間隔の手前まで取る**(16 分 @120bpm = 125ms に対して 115ms)。**Kick(45Hz)は 2ms ビンだと
+  波の谷で包絡線が落ち、90〜130ms 後にもう一度しきい値をまたぐ**。余分が Kick の直後だけに出るなら、
+  25ms ビン程度で包絡線を見て**単調減衰なら検出器の見かけ**と判断してよい。
+- **全ステップ ON のような途切れない音は、しきい値交差では発音を区切れない**(Crash の減衰が重なり、包絡線が下がらない)。
+  `wav_steps.py` は 16 分ごとに**「直前 10ms の谷 / 直後 16ms の山」の比**を追い、ステップ位置ごとの平均を出す。
+  **どのステップも同じくらいの比(21d の実測で 3.5〜4.4)なら欠けは無い。**
 
 **実機: カメラ録音 → WAV 抽出 → 同じ判定**
 

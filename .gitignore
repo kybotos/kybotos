@@ -9,3 +9,6 @@ hosts/linux/build/
 hosts/linux/sdcard/
 captures/
 tools/midi_clock_probe/build/
+
+# Python のバイトコード(scripts/ の判定スクリプトを import したときにできる)
+__pycache__/
