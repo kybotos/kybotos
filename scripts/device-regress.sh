@@ -85,9 +85,20 @@ send_cmd() { "$HPANE" send esp32-monitor "$1" >/dev/null 2>&1; }
 
 # --- モニタの起動 / 後始末 ---------------------------------------------------
 
+# **idf.py monitor を走らせているコンテナだけ**を返す(Phase 21e)。イメージで絞るだけだと、
+# 同じイメージで常駐する IDE の clangd(emacs の lsp-docker)まで kill していた(docs/workflow.md §3.4)
+monitor_containers() {
+    local id
+    for id in $(docker ps -q --filter "ancestor=$IMAGE"); do
+        case "$(docker inspect "$id" --format '{{.Config.Cmd}}')" in
+            *monitor*) printf '%s ' "$id" ;;
+        esac
+    done
+}
+
 kill_stale_containers() {
     local ids
-    ids=$(docker ps -q --filter "ancestor=$IMAGE")
+    ids=$(monitor_containers)
     if [ -n "$ids" ]; then
         say "note: killing leftover $IMAGE container(s) holding $PORT: $ids"
         # workflow.md §3.2 の既知の対処。hpane 経由で落とす。
@@ -98,7 +109,7 @@ kill_stale_containers() {
 cleanup() {
     if [ "$KEEP_MONITOR" -eq 0 ]; then
         local ids
-        ids=$(docker ps -q --filter "ancestor=$IMAGE")
+        ids=$(monitor_containers)
         [ -n "$ids" ] && "$HPANE" run esp32-build "docker kill $ids" 60000 >/dev/null 2>&1
     fi
 }

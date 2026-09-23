@@ -340,7 +340,7 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
     case "$(docker inspect "$id" --format '{{.Config.Cmd}}')" in *monitor*) docker kill "$id";; esac
   done
   ```
-  **`scripts/device-regress.sh` は今もイメージで絞って全部止める**(実行前と終了時)ので、clangd も落とす(21e の回帰で実際に落とした。直しは別途)。
+  **`scripts/device-regress.sh` もこの形で止める**(実行前と終了時。Phase 21e で修正。それまでは回帰のたびに clangd を落としていた)。
 - **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
   (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
   取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
