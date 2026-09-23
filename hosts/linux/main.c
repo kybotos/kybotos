@@ -47,9 +47,11 @@
  * sequencer(コード 13KB)は実機の 48KB で起動するが、Linux では load 時の最大消費が
  * 58.8KB になり「allocate memory failed」で起動しなかった(docs/results/phase18.md)。
  * Linux は内部 RAM の制約が無いので 96KB にする。実機の余裕は実機のログで見る。 */
-static uint8_t s_wamr_heap[192 * 1024]; /* Phase 19a: タイル表示で 96KB を超えたので 192KB へ。
+static uint8_t s_wamr_heap[256 * 1024]; /* Phase 19a: タイル表示で 96KB を超えたので 192KB へ。
                                          * Linux は internal RAM の制約が無いので、実機の判断と
-                                         * 切り離すために広めに取る(可否と余裕は実機で測る) */
+                                         * 切り離すために広めに取る(可否と余裕は実機で測る)。
+                                         * Phase 21d: Drum クリップの編集画面で消費 182,736 B になり
+                                         * 192KB では create_exec_env failed。256KB へ(ユーザー承認済み) */
 
 static NativeSymbol s_native_symbols[] = {
     HOSTAPI_NATIVE_SYMBOLS(HOSTAPI_SYMBOL_ENTRY)

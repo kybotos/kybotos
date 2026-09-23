@@ -25,7 +25,7 @@
  *
  * 描画は (x,y) をキーにした retained モデル。同一座標への再描画は
  * 既存オブジェクトの置き換え(移動・部分消去の API はない)。
- * スロットは text / rect 各 16。あふれは警告ログの上で無視される。
+ * スロットは text 80 / rect 48(Phase 19a・21d で拡張。当初は各 16)。あふれは警告ログの上で無視される。
  *
  *   hostapi_draw_text(x, y, str_ptr, str_len)
  *     UTF-8 文字列を (x,y) に描画。色は白(hostapi_draw_text_rgb の 0xffffff と同じ)。

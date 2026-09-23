@@ -38,8 +38,8 @@
 #define SCREEN_H 240
 #define WINDOW_SCALE 2
 
-#define MAX_TEXT_SLOTS 32 /* Phase 19a: タイル表示のため 16 → 32(実機と同値) */
-#define MAX_RECT_SLOTS 24 /* Phase 19a: 16 → 24(実機と同値) */
+#define MAX_TEXT_SLOTS 80 /* Phase 19a: 16 → 32、Phase 21d: 32 → 80(実機と同値) */
+#define MAX_RECT_SLOTS 48 /* Phase 19a: 16 → 24、Phase 21d: 24 → 48(実機と同値) */
 #define MAX_TEXT_LEN 63
 #define EVENT_QUEUE_DEPTH 16
 

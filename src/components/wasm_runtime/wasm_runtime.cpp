@@ -69,7 +69,11 @@ static const char* TAG = "WASM";
 // スタックが取れない)。**プールが PSRAM にあるので internal RAM は 1 バイトも減らず**、
 // 代償は `free_psram` が 16KB 下がるだけである(余裕 186KB)。
 // **これが「プールの拡大が internal の天井から外れた」ことの最初の実例**になる。
-static constexpr size_t kWamrPoolBytes = 128 * 1024;
+//
+// **Phase 21d で 144KB にした(ユーザー承認済み。承認は 160KB まで)。** Drum クリップのバンク化と
+// 編集画面を積んだ sequencer(`.wasm` 52,751 B)は **128KB では instantiate が
+// 「allocate memory failed」**になった。
+static constexpr size_t kWamrPoolBytes = 144 * 1024;
 static uint8_t* s_wamr_heap = nullptr;
 
 namespace wasmrt {
