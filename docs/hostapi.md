@@ -243,8 +243,8 @@ HOSTAPI_SEQ_OP_STOP(seq_write の status に指定する。Phase 17)
 | 見るイベント | **Note On(`0x9n`)で `velocity > 0` のものだけ** |
 | **Note Off / velocity 0 の Note On** | **無視する。** 打楽器はワンショットなので鳴りっぱなしにならない。**パターン 1 小節あたりのイベント数が半分になる** |
 | チャンネル(`0x9n` の `n`) | **無視する。** ポートが既に宛先を決めているので二重指定になる |
-| note 番号 | **GM ドラム準拠。** v1 は **36 Kick / 38 Snare / 42 Closed HH / 49 Crash**。**未知の番号は何もしない**(ログも出さない — L0 のディスパッチャから呼ばれるため) |
-| velocity | 1..127 をゲインへ線形に写す。マスター音量と乗算(CLICK と同じ) |
+| note 番号 | **GM ドラム準拠。** v1 は **36 Kick / 38 Snare / 42 Closed HH / 49 Crash**。**Phase 21c で 33 Metronome Click / 34 Metronome Bell(GM2 / GS)を追加**(ウッドブロック系の短い共鳴音、34 のほうが高く長い。**非破壊** — 今まで無視されていた note が鳴るようになるだけ)。**未知の番号は何もしない**(ログも出さない — L0 のディスパッチャから呼ばれるため) |
+| velocity | 1..127 をゲインへ線形に写す。マスター音量と乗算(CLICK と同じ)。さらに**ミキサーの Synth チャネルの値と MUTE** が掛かる(Phase 21b / 21c)。**Click の MUTE(既定 ON)は効かない** |
 | 同時発音数 | **`HOSTAPI_SYNTH_VOICES` = 8** |
 | 溢れたとき | **同じ note の最も古いボイスを奪う。無ければ全体で最も古いもの**を奪う |
 | `transport_stop` / アプリ破棄 | 鳴っているボイスを消す(`seqcore_reset` と同じ) |

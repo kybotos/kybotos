@@ -339,12 +339,17 @@ enum {
  *   これによりパターン 1 小節あたりのイベント数が半分になる。
  * - **チャンネル(0x9n の n)は無視する。** ポートが既に宛先を決めているので、
  *   チャンネルは二重の宛先指定になる。0x90〜0x9F のどれを書いてもよい。
- * - **note 番号は GM ドラム準拠。** v1 が鳴らすのは次の 4 つで、**未知の番号は
+ * - **note 番号は GM ドラム準拠。** 鳴らすのは次の 6 つで、**未知の番号は
  *   何もしない**(ログも出さない。L0 のディスパッチャから呼ばれるため):
  *     36 = Bass Drum / 38 = Acoustic Snare / 42 = Closed Hi-Hat / 49 = Crash Cymbal
+ *     33 = Metronome Click / 34 = Metronome Bell(Phase 21c。GM2 / GS の番号)
+ *   33 / 34 は**メトロノームの音**(ウッドブロック系の短い共鳴音。34 のほうが高く長い)。
+ *   **追加は非破壊**(今まで無視されていた note が鳴るようになるだけ)。
  *   同じ data1 をそのまま DIN_OUT へ出せば外部音源も同じ音になる。
  * - **velocity 1..127 はゲインへ線形に写す。** マスター音量
  *   (hostapi_audio_set_volume)と乗算されるのは CLICK と同じ。
+ *   さらに**装置の設定(ミキサー)の Synth チャネルの値と MUTE が掛かる**(Phase 21b / 21c)。
+ *   **CLICK ポートの MUTE(既定 ON)は SYNTH には効かない。**
  * - **同時発音数は HOSTAPI_SYNTH_VOICES。** 溢れたときは
  *   **同じ note の最も古いボイスを奪い、無ければ全体で最も古いもの**を奪う
  *   (ハイハットの連打が自分を切る動きになる)。
@@ -360,12 +365,15 @@ enum {
  */
 #define HOSTAPI_SYNTH_VOICES 8
 
-/* v1 が鳴らす GM ドラムの note 番号 */
+/* 内蔵音源が鳴らす note 番号(GM ドラム / GM2・GS) */
 enum {
     HOSTAPI_SYNTH_NOTE_KICK  = 36,
     HOSTAPI_SYNTH_NOTE_SNARE = 38,
     HOSTAPI_SYNTH_NOTE_CHH   = 42,
     HOSTAPI_SYNTH_NOTE_CRASH = 49,
+    /* Phase 21c で追加(メトロノーム。metronome アプリが CLICK ポートから移った) */
+    HOSTAPI_SYNTH_NOTE_METRO_CLICK = 33,
+    HOSTAPI_SYNTH_NOTE_METRO_BELL  = 34,
 };
 
 /* status が MIDI ステータスバイト(0x80 以上)でない場合の内部オペコード */

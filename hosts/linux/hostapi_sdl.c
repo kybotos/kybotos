@@ -93,6 +93,7 @@ typedef enum {
     VK_SNARE,  /* ノイズ + 減衰サイン */
     VK_HAT,    /* ハイパスしたノイズ(短い) */
     VK_CRASH,  /* ハイパスしたノイズ(長い) */
+    VK_WOOD,   /* 減衰サイン + すぐ消えるノイズ(メトロノーム。Phase 21c) */
 } VoiceKind;
 
 typedef struct {
@@ -220,6 +221,19 @@ static void voice_start_drum(uint8_t note, uint8_t velocity)
         v->n_amp = 5600.0f * g;
         v->n_decay = expf(-4.0f / (float)v->remaining);
         break;
+    case HOSTAPI_SYNTH_NOTE_METRO_CLICK:
+    case HOSTAPI_SYNTH_NOTE_METRO_BELL: {
+        /* メトロノーム(Phase 21c)。ウッドブロック系の短い共鳴音: 減衰サイン + 4ms で消えるノイズ
+         * (叩いた瞬間のアタック)。**Bell は Click より高く長く鳴る**(明るく目立つ)。
+         * 中〜高域に置くのは内蔵スピーカーが低域を出さないため(所感 D-1)。
+         * **式と定数は実機の audio.cpp と同じにすること** */
+        const bool bell = (note == HOSTAPI_SYNTH_NOTE_METRO_BELL);
+        v->kind = VK_WOOD;
+        voice_set_sine(v, bell ? 2000.0f : 1200.0f, CLICK_RATE * (bell ? 150 : 60) / 1000, 8000.0f * g);
+        v->n_amp = 3000.0f * g;
+        v->n_decay = expf(-5.0f / ((float)CLICK_RATE * 0.004f));
+        break;
+    }
     default:
         v->kind = VK_IDLE; /* 未知の note は何もしない(ログも出さない) */
         v->remaining = 0;
@@ -255,13 +269,14 @@ static void voice_render(Voice* v, int32_t* acc, int n)
         switch (v->kind) {
         case VK_TONE:
         case VK_KICK:
-        case VK_SNARE: {
+        case VK_SNARE:
+        case VK_WOOD: {
             const float s2 = v->s * v->cw + v->c * v->sw;
             v->c = v->c * v->cw - v->s * v->sw;
             v->s = s2;
             v->amp *= v->decay;
             out = v->amp * v->s;
-            if (v->kind == VK_SNARE) {
+            if (v->kind == VK_SNARE || v->kind == VK_WOOD) {
                 v->n_amp *= v->n_decay;
                 out += v->n_amp * voice_noise(v);
             }
