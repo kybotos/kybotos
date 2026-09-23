@@ -1,6 +1,6 @@
 // Phase 6B/6C: MP3 プレーヤー本体。
 // - hostapi_fs_list でミュージックルートの .mp3 を列挙しリスト表示(6 行+スクロール)
-// - 行タップで選択・再生。PLAY / PAUSE(トグル) / STOP / VOL± ボタン
+// - 行タップで選択・再生。PLAY / PAUSE(トグル) / STOP ボタン(VOL± は Phase 21c で外した)
 // - 毎 tick get_state をポーリングし、FINISHED で次曲へ(末尾なら停止)
 // - エラー表示: 曲なし(リスト空)、再生失敗(state: ERROR)
 // ホスト API (module "env") のみ使用。no_std / アロケータ不要。
@@ -17,7 +17,6 @@ extern "C" {
     fn hostapi_poll_event(buf: *mut u8, buf_len: u32) -> i32;
     fn hostapi_audio_play(path: *const u8, path_len: u32) -> i32;
     fn hostapi_audio_ctrl(cmd: i32) -> i32;
-    fn hostapi_audio_set_volume(v: i32);
     fn hostapi_audio_get_state() -> i32;
     fn hostapi_fs_list(idx: i32, buf: *mut u8, buf_len: u32) -> i32;
 }
@@ -55,8 +54,9 @@ const SCROLL_W: i32 = 22;
 const BTN_Y: i32 = 204;
 const BTN_H: i32 = 32;
 const BTN_W: i32 = 56;
-const BTN_XS: [i32; 5] = [12, 74, 136, 198, 260];
-const BTN_LABELS: [&[u8]; 5] = [b"PLAY", b"PAUS", b"STOP", b"V-", b"V+"];
+// V- / V+ は Phase 21c で外した(音量は装置の設定のミキサーへ)。位置は変えず右の 2 枠を空ける
+const BTN_XS: [i32; 3] = [12, 74, 136];
+const BTN_LABELS: [&[u8]; 3] = [b"PLAY", b"PAUS", b"STOP"];
 
 const MAX_TRACKS: usize = 16;
 const NAME_MAX: usize = 64;
@@ -67,7 +67,6 @@ static mut TRACK_LENS: [usize; MAX_TRACKS] = [0; MAX_TRACKS];
 static mut TRACK_COUNT: usize = 0;
 static mut SELECTED: usize = 0;
 static mut OFFSET: usize = 0; // リスト先頭に表示する曲 index
-static mut VOLUME: i32 = 98;
 static mut LAST_STATE: i32 = -1;
 static mut LAST_RC: i32 = 0;
 
@@ -149,7 +148,6 @@ fn draw_status() {
     let mut line = Line::new();
     line.push(b"state: ").push(state_name(st));
     unsafe {
-        line.push(b" vol: ").push_i32(VOLUME);
         if LAST_RC != 0 {
             line.push(b" rc: ").push_i32(LAST_RC);
         }
@@ -189,7 +187,7 @@ fn draw_list() {
 }
 
 fn draw_buttons() {
-    for i in 0..5 {
+    for i in 0..BTN_XS.len() {
         unsafe {
             hostapi_fill_rect(BTN_XS[i], BTN_Y, BTN_W, BTN_H, 0x20_40_a0);
             hostapi_draw_text(BTN_XS[i] + 8, BTN_Y + 8, BTN_LABELS[i].as_ptr(),
@@ -239,7 +237,7 @@ fn handle_tap(x: i16, y: i16) {
         // ボタン行
         if y >= BTN_Y && y < BTN_Y + BTN_H {
             let st = hostapi_audio_get_state();
-            for i in 0..5 {
+            for i in 0..BTN_XS.len() {
                 if x >= BTN_XS[i] && x < BTN_XS[i] + BTN_W {
                     match i {
                         0 => play_selected(),
@@ -253,16 +251,6 @@ fn handle_tap(x: i16, y: i16) {
                             };
                         }
                         2 => LAST_RC = hostapi_audio_ctrl(CMD_STOP),
-                        3 | 4 => {
-                            VOLUME += if i == 3 { -10 } else { 10 };
-                            if VOLUME < 0 {
-                                VOLUME = 0;
-                            }
-                            if VOLUME > 100 {
-                                VOLUME = 100;
-                            }
-                            hostapi_audio_set_volume(VOLUME);
-                        }
                         _ => {}
                     }
                     break;
@@ -280,7 +268,6 @@ pub extern "C" fn app_init() -> i32 {
         let title = b"MP3 player (wasm)";
         hostapi_draw_text(12, 12, title.as_ptr(), title.len() as u32);
 
-        VOLUME = 98;
         SELECTED = 0;
         OFFSET = 0;
         LAST_STATE = -1;

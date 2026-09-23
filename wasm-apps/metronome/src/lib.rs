@@ -3,11 +3,15 @@
 //
 // 旧版(Phase 7B/7C/7D/8b)からの機能は維持する:
 //   BPM 40-240(±5 / ±1、長押し連打加速)、拍子 2/3/4/6、START/STOP、拍ランプ、
-//   小節頭のアクセント音(slot 1)、音量 V-/V+。
+//   小節頭のアクセント音。
+//
+// Phase 21c: 音を CLICK ポートから**内蔵音源(SYNTH)の note 34(小節頭)/ 33** へ移した
+// (Click は「機能的なクリック」として既定 MUTE になったため)。音量 UI(Vol: / V- / V+)は
+// 装置の設定(ミキサー)へ移ったので外した。音量はミキサーの Synth チャネルに乗る。
 //
 // 旧版との違い(内部だけ。使い勝手は同じ):
 //   - クリックは `hostapi_tone_schedule` の毎 tick 再予約ではなく、
-//     `seq_write`(port=CLICK / OP_TONE)で **playback tick** に予約する。
+//     `seq_write`(21c から port=SYNTH / Note On)で **playback tick** に予約する。
 //     供給はプレフィックス受理契約どおり(docs/hostapi.md §5 / §10)。
 //   - MIDI Clock はホスト(L1)が 40 tick グリッドから生成する。**アプリは
 //     Start/Stop も含めて MIDI を一切送らない**(`hostapi_midi_send` は使わない。
@@ -30,8 +34,6 @@ extern "C" {
     fn hostapi_fill_rect(x: i32, y: i32, w: i32, h: i32, rgb888: u32);
     fn hostapi_poll_event(buf: *mut u8, buf_len: u32) -> i32;
     fn hostapi_now_ms() -> u32;
-    fn hostapi_tone_define(slot: i32, wave: i32, freq_hz: i32, dur_ms: i32, level: i32) -> i32;
-    fn hostapi_audio_set_volume(v: i32);
 
     fn hostapi_transport_start() -> i32;
     fn hostapi_transport_stop() -> i32;
@@ -46,11 +48,12 @@ extern "C" {
 const PPQN: u32 = 960;
 const BEAT: u32 = PPQN; // 4 分音符 = 1 拍(denom は常に 4)
 
-const PORT_CLICK: u8 = 3;
-const OP_TONE: u8 = 1;
-
-// アクセント音のスロット(1 拍目用)。slot 0 は既定クリック(通常拍)のまま
-const ACCENT_SLOT: u32 = 1;
+// 内蔵音源(shared/hostapi_defs.h の SYNTH ポートの契約)。チャンネルは無視されるが GM に倣い ch10
+const PORT_SYNTH: u8 = 2;
+const NOTE_ON_CH10: u8 = 0x99;
+const NOTE_METRO_CLICK: u8 = 33; // 通常拍
+const NOTE_METRO_BELL: u8 = 34; // 小節頭(高く長い)
+const VELOCITY: u8 = 127; // 強弱は音色の式で付ける(調整箇所を 1 つにするため)
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -94,7 +97,8 @@ const MAX_BEATS: usize = 6;
 
 const FINE_Y: i32 = 120;
 const FINE_H: i32 = 44;
-const FINE_LABELS: [&[u8]; 4] = [b"-1", b"+1", b"V-", b"V+"];
+// -1 は BPM- の真上、+1 は BPM+ の真上(右の 2 枠は Phase 21c で V-/V+ を外して空けた)
+const FINE_LABELS: [&[u8]; 2] = [b"-1", b"+1"];
 
 const BTN_Y: i32 = 176;
 const BTN_H: i32 = 52;
@@ -105,10 +109,6 @@ const BTN_LABELS: [&[u8]; 4] = [b"BPM-", b"BPM+", b"BEAT", b"START"];
 const BPM_MIN: u32 = 40;
 const BPM_MAX: u32 = 240;
 const SIGS: [u32; 4] = [2, 3, 4, 6]; // 1 小節の拍数
-
-const VOLUME_MIN: i32 = 0;
-const VOLUME_MAX: i32 = 100;
-const VOLUME_STEP: i32 = 10;
 
 // 長押し連打加速(Phase 7D)。押下直後に 1 ステップ、HOLD_INITIAL_DELAY_MS 後から
 // 自動連打を開始し、保持時間に応じて 400ms→200ms→100ms へ縮める。
@@ -122,7 +122,6 @@ const HOLD_INTERVAL_3_MS: u32 = 100;
 static mut BPM: u32 = 120;
 static mut SIG_IDX: usize = 2; // 4 拍子
 static mut RUNNING: bool = false;
-static mut VOLUME: i32 = 98; // ホスト既定(hostapi_audio_reset)と同値
 
 // L2 の供給状態。OFFSET は song tick 0 に対応する playback tick
 // (locate / start の直後に取り直す。それ以外では不変)
@@ -234,17 +233,17 @@ fn resync() {
 }
 
 /// 拍 i(song tick = i * BEAT)のクリックイベントを組み立てる。
-/// 小節頭はアクセント用スロット、他は既定スロット。
+/// 小節頭は Metronome Bell(34)、他は Metronome Click(33)。
 fn build_beat(i: u32, out: &mut [SeqEvent; CHUNK_MAX]) -> usize {
     unsafe {
-        let slot = if i % beats_per_bar() == 0 { ACCENT_SLOT } else { 0 };
+        let note = if i % beats_per_bar() == 0 { NOTE_METRO_BELL } else { NOTE_METRO_CLICK };
         out[0] = SeqEvent {
             tick: OFFSET.wrapping_add(i.wrapping_mul(BEAT)),
-            port: PORT_CLICK,
-            status: OP_TONE,
-            data1: 0,
-            data2: 0,
-            param: slot,
+            port: PORT_SYNTH,
+            status: NOTE_ON_CH10,
+            data1: note,
+            data2: VELOCITY,
+            param: 0,
             reserved: 0,
         };
     }
@@ -328,8 +327,7 @@ fn apply_meter() {
 fn draw_status() {
     unsafe {
         let mut l = Line::new();
-        l.push(b"BPM: ").push_u32(BPM).push(b"   beats/bar: ").push_u32(SIGS[SIG_IDX])
-         .push(b"  Vol: ").push_u32(VOLUME as u32);
+        l.push(b"BPM: ").push_u32(BPM).push(b"   beats/bar: ").push_u32(SIGS[SIG_IDX]);
         l.draw(12, 50);
     }
 }
@@ -376,7 +374,7 @@ fn draw_buttons() {
 }
 
 fn draw_fine_buttons() {
-    for i in 0..4 {
+    for i in 0..FINE_LABELS.len() {
         unsafe {
             hostapi_fill_rect(BTN_XS[i], FINE_Y, BTN_W, FINE_H, 0x18_50_70);
             hostapi_draw_text(BTN_XS[i] + 24, FINE_Y + 18, FINE_LABELS[i].as_ptr(),
@@ -396,17 +394,6 @@ fn apply_bpm_delta(delta: i32) {
         if new_bpm != BPM {
             BPM = new_bpm;
             apply_tempo();
-        }
-    }
-    draw_status();
-}
-
-fn apply_volume_delta(delta: i32) {
-    unsafe {
-        let new_vol = (VOLUME + delta).clamp(VOLUME_MIN, VOLUME_MAX);
-        if new_vol != VOLUME {
-            VOLUME = new_vol;
-            hostapi_audio_set_volume(VOLUME);
         }
     }
     draw_status();
@@ -469,15 +456,13 @@ fn handle_tap(x: i16, y: i16) {
     let (x, y) = (x as i32, y as i32);
     let now = unsafe { hostapi_now_ms() };
 
-    // -1 / +1 / V- / V+(Phase 7D の行)
+    // -1 / +1(Phase 7D の行。V- / V+ は Phase 21c で外した)
     if y >= FINE_Y && y < FINE_Y + FINE_H {
-        for i in 0..4 {
+        for i in 0..FINE_LABELS.len() {
             if x >= BTN_XS[i] && x < BTN_XS[i] + BTN_W {
                 match i {
                     0 => start_repeat(-1, now),
                     1 => start_repeat(1, now),
-                    2 => apply_volume_delta(-VOLUME_STEP),
-                    3 => apply_volume_delta(VOLUME_STEP),
                     _ => {}
                 }
                 break;
@@ -521,7 +506,6 @@ pub extern "C" fn app_init() -> i32 {
         BPM = 120;
         SIG_IDX = 2;
         RUNNING = false;
-        VOLUME = 98;
         HELD_DELTA = 0;
         OFFSET = 0;
         NEXT_BEAT = 0;
@@ -529,9 +513,6 @@ pub extern "C" fn app_init() -> i32 {
         PENDING_OFF = 0;
         LAMP_LIT = usize::MAX;
         LAST_BEAT_KEY = u64::MAX;
-
-        // 1 拍目のアクセント音(高いピッチ)。通常拍は slot 0 の既定クリック
-        hostapi_tone_define(ACCENT_SLOT as i32, 0 /*SINE*/, 1568, 30, 100);
 
         // テンポ / 拍子マップは常に at_tick=0 の 1 エントリだけを上書きして使う
         hostapi_tempomap_set_meter(0, beats_per_bar() as i32, 4);
