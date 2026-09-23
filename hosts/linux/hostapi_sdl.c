@@ -119,9 +119,10 @@ static uint64_t s_audio_samples;   /* 再生済みフレーム数(音声クロ�
  * 98 は HW のつまみを最大にすると大きすぎたため 50 にした(暫定。実機の試聴で決める) */
 #define DEFAULT_MASTER_VOL MASTERUI_DEF_MASTER
 static int s_master_vol = DEFAULT_MASTER_VOL;
-/* ポート単位のゲイン(Phase 21b 追記)。**実効音量 = マスター × チャンネル** */
+/* ポート単位のゲイン(Phase 21b 追記)。**実効音量 = マスター × チャンネル**。
+ * master_ui が MUTE を畳み込んだ実効値(MUTE 中は 0)を入れる(Phase 21c) */
 static int s_gain_mp3 = MASTERUI_DEF_MP3;
-static int s_gain_drum = MASTERUI_DEF_DRUM;
+static int s_gain_synth = MASTERUI_DEF_SYNTH;
 static int s_gain_click = MASTERUI_DEF_CLICK;
 
 /* 発音要求のキュー(ロック下で積み、コールバックが取り出す)。
@@ -186,7 +187,7 @@ static void voice_start_tone(const ToneDef* t)
 static void voice_start_drum(uint8_t note, uint8_t velocity)
 {
     const float g = (float)velocity / 127.0f * (float)s_master_vol / 100.0f
-                    * (float)s_gain_drum / 100.0f;
+                    * (float)s_gain_synth / 100.0f;
     Voice* v = voice_alloc(note);
     if (!v) return;
     memset(v, 0, sizeof(*v));
@@ -606,7 +607,7 @@ static void masterui_set_level_cb(masterui_item_t item, int v)
     switch (item) {
     case MASTERUI_MASTER: s_master_vol = v; break;
     case MASTERUI_MP3:    s_gain_mp3 = v;   break;
-    case MASTERUI_DRUM:   s_gain_drum = v;  break;
+    case MASTERUI_SYNTH:  s_gain_synth = v; break;
     case MASTERUI_CLICK:  s_gain_click = v; break;
     default: break;
     }
@@ -624,18 +625,10 @@ void host_sdl_masterui_init(void)
 void native_hostapi_audio_set_volume(wasm_exec_env_t exec_env, int32_t v)
 {
     (void)exec_env;
-    if (v < 0) v = 0;
-    if (v > 100) v = 100;
-    /* マスター音量 (v2): MP3 とクリックの両方に適用 */
-    if (s_audio) {
-        SDL_LockAudioDevice(s_audio);
-        s_master_vol = v;
-        apply_mp3_volume();
-        SDL_UnlockAudioDevice(s_audio);
-    }
-#ifdef HAVE_SDL_MIXER
-    if (s_mixer_ready) Mix_VolumeMusic(v * MIX_MAX_VOLUME / 100);
-#endif
+    /* マスター音量はホストの設定(Phase 21b)。**master_ui を通す**(Phase 21c):
+     * 直接 s_master_vol を書くと Master の MUTE を素通りし、オーバーレイの表示ともずれる。
+     * クランプとゲインの反映は masterui_set_level → masterui_set_level_cb が行う */
+    masterui_set_level(MASTERUI_MASTER, v);
 }
 
 int32_t native_hostapi_audio_get_state(wasm_exec_env_t exec_env)
@@ -1188,18 +1181,22 @@ static void draw_master_overlay(void)
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         const int ry = MASTERUI_ROW_Y(i);
         const int ty = ry + 8;
-        draw_string(MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i), 0xffffff);
+        /* ラベルの箱 = MUTE のトグル(Phase 21c)。状態は文字色: 緑 = 鳴る / 灰 = MUTE */
+        const bool muted = masterui_is_muted((masterui_item_t)i);
+        const uint32_t on_col = muted ? 0x707880 : 0x40e070;
+        host_sdl_rect(MASTERUI_MUTE_X, ry, MASTERUI_MUTE_W, MASTERUI_ROW_H, 0x2a3340);
+        draw_string(MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i), on_col);
         host_sdl_rect(MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
         draw_string(MASTERUI_MINUS_X + 16, ty, "-", 0xffffff);
         host_sdl_rect(MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
         draw_string(MASTERUI_PLUS_X + 16, ty, "+", 0xffffff);
         v = masterui_level((masterui_item_t)i);
         snprintf(buf, sizeof(buf), "%d", v);
-        draw_string(MASTERUI_VALUE_X, ty, buf, 0x40e070);
+        draw_string(MASTERUI_VALUE_X, ty, buf, on_col);
         /* バー(要否は使ってから判断する。ユーザー指示) */
         host_sdl_rect(MASTERUI_BAR_X, ry + 10, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
         fill = MASTERUI_BAR_W * v / 100;
-        if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, ry + 10, fill, MASTERUI_BAR_H, 0x40e070);
+        if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, ry + 10, fill, MASTERUI_BAR_H, on_col);
     }
 }
 

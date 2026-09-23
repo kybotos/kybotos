@@ -6,10 +6,12 @@
 static const masterui_hooks_t *s_hooks;
 static bool s_open;
 static int s_level[MASTERUI_ITEMS];
-static const char *const k_labels[MASTERUI_ITEMS] = { "Master", "MP3", "Drums", "Click" };
+static bool s_muted[MASTERUI_ITEMS];
+static const char *const k_labels[MASTERUI_ITEMS] = { "Master", "MP3", "Synth", "Click" };
 static const int k_defaults[MASTERUI_ITEMS] = {
-    MASTERUI_DEF_MASTER, MASTERUI_DEF_MP3, MASTERUI_DEF_DRUM, MASTERUI_DEF_CLICK
+    MASTERUI_DEF_MASTER, MASTERUI_DEF_MP3, MASTERUI_DEF_SYNTH, MASTERUI_DEF_CLICK
 };
+static const bool k_default_mute[MASTERUI_ITEMS] = { false, false, false, MASTERUI_DEF_MUTE_CLICK };
 
 /* 上端で始まった押下の保留(結論が出るまでアプリへ渡さない) */
 static bool s_holding;
@@ -23,13 +25,19 @@ static uint32_t s_next_repeat_at;
 
 static uint32_t now_ms(void) { return (s_hooks && s_hooks->now_ms) ? s_hooks->now_ms() : 0; }
 
+/* ホストへは実効値(MUTE 中は 0)を渡す。ホストのゲイン計算は MUTE を知らなくてよい */
+static void push_level(masterui_item_t item)
+{
+    if (s_hooks && s_hooks->set_level) s_hooks->set_level(item, masterui_effective(item));
+}
+
 static void apply_level(masterui_item_t item, int v)
 {
     if (item < 0 || item >= MASTERUI_ITEMS) return;
     if (v < 0) v = 0;
     if (v > 100) v = 100;
     s_level[item] = v;
-    if (s_hooks && s_hooks->set_level) s_hooks->set_level(item, v);
+    push_level(item);
 }
 
 static bool in_rect(int x, int y, int rx, int ry, int rw, int rh)
@@ -45,7 +53,10 @@ void masterui_init(const masterui_hooks_t *hooks)
     s_holding = false;
     s_held_item = -1;
     s_held_delta = 0;
-    for (i = 0; i < MASTERUI_ITEMS; i++) apply_level((masterui_item_t)i, k_defaults[i]);
+    for (i = 0; i < MASTERUI_ITEMS; i++) {
+        s_muted[i] = k_default_mute[i];
+        apply_level((masterui_item_t)i, k_defaults[i]);
+    }
 }
 
 bool masterui_is_open(void) { return s_open; }
@@ -55,6 +66,20 @@ int masterui_level(masterui_item_t item)
     if (item < 0 || item >= MASTERUI_ITEMS) return 0;
     return s_level[item];
 }
+
+bool masterui_is_muted(masterui_item_t item)
+{
+    if (item < 0 || item >= MASTERUI_ITEMS) return false;
+    return s_muted[item];
+}
+
+int masterui_effective(masterui_item_t item)
+{
+    if (item < 0 || item >= MASTERUI_ITEMS) return 0;
+    return s_muted[item] ? 0 : s_level[item];
+}
+
+void masterui_set_level(masterui_item_t item, int v) { apply_level(item, v); }
 
 const char *masterui_label(masterui_item_t item)
 {
@@ -99,6 +124,12 @@ static masterui_action_t on_touch_open(uint16_t type, int x, int y)
             for (i = 0; i < MASTERUI_ITEMS; i++) {
                 const int ry = MASTERUI_ROW_Y(i);
                 int delta = 0;
+                if (in_rect(x, y, MASTERUI_MUTE_X, ry, MASTERUI_MUTE_W, MASTERUI_ROW_H)) {
+                    /* ラベル = MUTE のトグル(Phase 21c)。戻せる操作なので 1 タップ、DOWN で即 */
+                    s_muted[i] = !s_muted[i];
+                    push_level((masterui_item_t)i);
+                    break;
+                }
                 if (in_rect(x, y, MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H)) delta = -1;
                 else if (in_rect(x, y, MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H)) delta = 1;
                 if (delta != 0) {

@@ -183,7 +183,7 @@ int32_t s_acc[kMixBlock];
 int16_t s_chunk[kMixBlock * 2];
 
 // ミキサ側が使うポート別ゲイン(Mp3Player::set_gain が写す。Phase 21b)
-int s_gain_drum = 100;
+int s_gain_synth = 100;
 int s_gain_click = 100;
 
 bool s_mixer_suspended; // ログを状態変化のときだけ出すための記録
@@ -234,7 +234,7 @@ void voice_start_tone(const Mp3Player::ToneMsg& t, int master_vol)
 void voice_start_drum(uint8_t note, uint8_t velocity, int master_vol)
 {
     const float g = (float)velocity / 127.0f * (float)master_vol / 100.0f
-                    * (float)s_gain_drum / 100.0f;
+                    * (float)s_gain_synth / 100.0f;
     Voice* v = voice_alloc(note);
     if (!v) return;
     memset(v, 0, sizeof(*v));
@@ -352,11 +352,11 @@ bool Mp3Player::play_drum(uint8_t note, uint8_t velocity) noexcept {
     return xQueueSend(tone_queue_, &msg, 0) == pdTRUE;
 }
 
-void Mp3Player::set_gain(uint8_t mp3, uint8_t drum, uint8_t click) noexcept {
+void Mp3Player::set_gain(uint8_t mp3, uint8_t synth, uint8_t click) noexcept {
     gain_mp3_.store(mp3);
-    gain_drum_.store(drum);
+    gain_synth_.store(synth);
     gain_click_.store(click);
-    s_gain_drum = drum;
+    s_gain_synth = synth;
     s_gain_click = click;
 }
 
@@ -728,8 +728,8 @@ extern "C" void Synth_Reset(void) {
     if (g_player) g_player->synth_reset();
 }
 
-extern "C" void Set_Port_Gain(uint8_t mp3, uint8_t drum, uint8_t click) {
-    if (g_player) g_player->set_gain(mp3, drum, click);
+extern "C" void Set_Port_Gain(uint8_t mp3, uint8_t synth, uint8_t click) {
+    if (g_player) g_player->set_gain(mp3, synth, click);
 }
 
 extern "C" void Play_Music(const char* directory, const char* fileName) {

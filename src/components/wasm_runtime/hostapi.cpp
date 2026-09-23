@@ -141,6 +141,7 @@ lv_obj_t* s_mui_catch = nullptr;
 lv_obj_t* s_mui_band = nullptr;
 lv_obj_t* s_mui_value[MASTERUI_ITEMS] = {};
 lv_obj_t* s_mui_barfill[MASTERUI_ITEMS] = {};
+lv_obj_t* s_mui_name[MASTERUI_ITEMS] = {}; // ラベル = MUTE のトグル(Phase 21c)
 
 lv_obj_t* mui_box(lv_obj_t* parent, int x, int y, int w, int h, uint32_t rgb)
 {
@@ -172,11 +173,17 @@ void mui_update_value()
         if (!s_mui_value[i]) continue;
         char buf[8];
         const int v = masterui_level((masterui_item_t)i);
+        // 状態は文字色: 緑 = 鳴る / 灰 = MUTE(Linux の draw_master_overlay と同じ色)
+        const lv_color_t col =
+            lv_color_hex(masterui_is_muted((masterui_item_t)i) ? 0x707880 : 0x40e070);
         snprintf(buf, sizeof(buf), "%d", v);
         lv_label_set_text(s_mui_value[i], buf);
+        lv_obj_set_style_text_color(s_mui_value[i], col, 0);
+        if (s_mui_name[i]) lv_obj_set_style_text_color(s_mui_name[i], col, 0);
         if (s_mui_barfill[i]) {
             const int w = MASTERUI_BAR_W * v / 100;
             lv_obj_set_width(s_mui_barfill[i], w > 0 ? w : 1);
+            lv_obj_set_style_bg_color(s_mui_barfill[i], col, 0);
         }
     }
 }
@@ -206,7 +213,9 @@ void mui_build()
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         const int ry = MASTERUI_ROW_Y(i);
         const int ty = ry + 6;
-        mui_label(s_mui_band, MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i), 0xffffff);
+        mui_box(s_mui_band, MASTERUI_MUTE_X, ry, MASTERUI_MUTE_W, MASTERUI_ROW_H, 0x2a3340);
+        s_mui_name[i] = mui_label(s_mui_band, MASTERUI_LABEL_X, ty,
+                                  masterui_label((masterui_item_t)i), 0x40e070);
         mui_box(s_mui_band, MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
         mui_label(s_mui_band, MASTERUI_MINUS_X + 16, ty, "-", 0xffffff);
         mui_box(s_mui_band, MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
@@ -228,6 +237,7 @@ void mui_destroy()
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         s_mui_value[i] = nullptr;
         s_mui_barfill[i] = nullptr;
+        s_mui_name[i] = nullptr;
     }
 }
 
@@ -685,9 +695,10 @@ int32_t native_hostapi_audio_ctrl(wasm_exec_env_t exec_env, int32_t cmd)
 void native_hostapi_audio_set_volume(wasm_exec_env_t exec_env, int32_t v)
 {
     (void)exec_env;
-    if (v < 0) v = 0;
-    if (v > 100) v = 100;
-    audio::Volume_adjustment((uint8_t)v);
+    // マスター音量はホストの設定(Phase 21b)。**master_ui を通す**(Phase 21c):
+    // 直接 Volume_adjustment を呼ぶと Master の MUTE を素通りし、オーバーレイの表示ともずれる。
+    // クランプとゲインの反映は masterui_set_level → mui_set_level_cb が行う
+    masterui_set_level(MASTERUI_MASTER, (int)v);
 }
 
 int32_t native_hostapi_audio_get_state(wasm_exec_env_t exec_env)
@@ -901,16 +912,17 @@ void hostapi_audio_reset()
 }
 
 // ---- マスター設定のフック(Phase 21b)----
-// **実効音量 = マスター × チャンネル。** チャンネルはポート単位(MP3 / 内蔵音源 / クリック)
+// **実効音量 = マスター × チャンネル × (MUTE ? 0 : 1)。** チャンネルはポート単位
+// (MP3 / 内蔵音源 / クリック)。v は MUTE を畳み込んだ実効値(Phase 21c)
 void mui_set_level_cb(masterui_item_t item, int v)
 {
     if (item == MASTERUI_MASTER) {
         audio::Volume_adjustment((uint8_t)v);
         return;
     }
-    audio::Set_Port_Gain((uint8_t)masterui_level(MASTERUI_MP3),
-                         (uint8_t)masterui_level(MASTERUI_DRUM),
-                         (uint8_t)masterui_level(MASTERUI_CLICK));
+    audio::Set_Port_Gain((uint8_t)masterui_effective(MASTERUI_MP3),
+                         (uint8_t)masterui_effective(MASTERUI_SYNTH),
+                         (uint8_t)masterui_effective(MASTERUI_CLICK));
 }
 uint32_t mui_now_ms_cb() { return (uint32_t)(esp_timer_get_time() / 1000); }
 const masterui_hooks_t kMasterUiHooks = { mui_set_level_cb, mui_now_ms_cb };

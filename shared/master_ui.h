@@ -34,12 +34,13 @@
 
 /* ---- 設定項目(Phase 21b。追記でミキサーを足した)----
  *
- * **実効音量 = マスター × チャンネル**(どちらも 0..100)。
- * チャンネルは**ポート単位**で、`architecture.md` §7 のポート抽象とそろえてある。 */
+ * **実効音量 = マスター × チャンネル × (MUTE ? 0 : 1)**(マスターとチャンネルは 0..100)。
+ * チャンネルは**ポート単位**で、`architecture.md` §7 のポート抽象とそろえてある。
+ * **MUTE は値とは別のフラグ**(Phase 21c)。アンミュートで元の値に戻る。 */
 typedef enum {
     MASTERUI_MASTER = 0, /* 全体 */
     MASTERUI_MP3,        /* MP3 再生 */
-    MASTERUI_DRUM,       /* 内蔵音源(SYNTH ポート) */
+    MASTERUI_SYNTH,      /* 内蔵音源(SYNTH ポート。21c で DRUM から改名) */
     MASTERUI_CLICK,      /* クリック(CLICK ポート) */
     MASTERUI_ITEMS
 } masterui_item_t;
@@ -47,8 +48,10 @@ typedef enum {
 /* 既定値。MP3 の実効は 50 * 0.35 = 17.5(実機の試聴で「18 くらい」だったのに合わせた) */
 #define MASTERUI_DEF_MASTER 50
 #define MASTERUI_DEF_MP3    35
-#define MASTERUI_DEF_DRUM   100
+#define MASTERUI_DEF_SYNTH  100
 #define MASTERUI_DEF_CLICK  100
+/* MUTE の既定(Phase 21c)。**Click は「機能的なクリック」なので既定で鳴らさない** */
+#define MASTERUI_DEF_MUTE_CLICK true
 
 /* ---- オーバーレイの座標(論理 320x240)---- */
 #define MASTERUI_ROW0_Y   34   /* 1 行目の上端 */
@@ -60,6 +63,9 @@ typedef enum {
 #define MASTERUI_CLOSE_W  32
 #define MASTERUI_CLOSE_H  28
 #define MASTERUI_LABEL_X  12
+/* ラベルの箱 = MUTE のトグル(Phase 21c)。**描画と当たり判定で同じ定数を使う** */
+#define MASTERUI_MUTE_X   8
+#define MASTERUI_MUTE_W   78
 #define MASTERUI_MINUS_X  90
 #define MASTERUI_PLUS_X   185
 #define MASTERUI_BTN_W    40
@@ -96,7 +102,7 @@ typedef enum {
 } masterui_action_t;
 
 typedef struct {
-    /* 設定項目の値をホストへ反映する(0..100)。起動時と変更時に呼ばれる */
+    /* 設定項目の**実効値**をホストへ反映する(0..100。MUTE 中は 0)。起動時と変更時に呼ばれる */
     void (*set_level)(masterui_item_t item, int v);
     /* 起動からの経過ミリ秒 */
     uint32_t (*now_ms)(void);
@@ -106,8 +112,14 @@ typedef struct {
 void masterui_init(const masterui_hooks_t *hooks);
 
 bool masterui_is_open(void);
-/* 項目の値(範囲外は 0) */
+/* 項目の値(範囲外は 0)。MUTE 中でも値そのものを返す */
 int  masterui_level(masterui_item_t item);
+/* MUTE 中か(Phase 21c) */
+bool masterui_is_muted(masterui_item_t item);
+/* ホストへ渡す実効値 = MUTE ? 0 : 値 */
+int  masterui_effective(masterui_item_t item);
+/* 値を外から設定する(hostapi_audio_set_volume が Master に使う)。MUTE は変えない */
+void masterui_set_level(masterui_item_t item, int v);
 /* 画面に出すラベル(ASCII) */
 const char *masterui_label(masterui_item_t item);
 /* 保留中の DOWN の座標(MASTERUI_FLUSH_THEN_PASS のときにホストが使う) */
