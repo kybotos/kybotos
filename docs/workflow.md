@@ -331,8 +331,16 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
   そのコマンドが実機のシリアル入力に流れる**(実機ログに `MBCMD: err unknown command ...`、
   回帰は「serial command console did not come up」で FAIL。Phase 21d で 1 回踏んだ)。
   **先に `docker kill <モニタのコンテナ>` し、`hpane.sh read esp32-monitor` でプロンプトに戻ったのを見てから**走らせる。
-  止めるコンテナは **MidiAppBox のイメージに絞る**(`docker ps -q --filter ancestor=<§3.2 のイメージ>`)。
-  `docker ps -q` 全部を kill しない(無関係のコンテナまで止まる)。
+  止めるコンテナは **`idf.py monitor` を走らせているものだけ**にする。`docker ps -q` 全部を kill しない(無関係のコンテナまで止まる)。
+  **イメージで絞るだけでも足りない**: **IDE の clangd(emacs の lsp-docker)が同じイメージで常駐している**ので、
+  `docker ps -q --filter ancestor=<§3.2 のイメージ>` を全部止めると IDE の言語サーバまで落ちる(Phase 21e で判明。
+  lsp-docker が時々いなくなっていた原因)。**コマンドに `monitor` を含むものだけ**を止める:
+  ```bash
+  for id in $(docker ps -q --filter ancestor=<§3.2 のイメージ>); do
+    case "$(docker inspect "$id" --format '{{.Config.Cmd}}')" in *monitor*) docker kill "$id";; esac
+  done
+  ```
+  **`scripts/device-regress.sh` は今もイメージで絞って全部止める**(実行前と終了時)ので、clangd も落とす(21e の回帰で実際に落とした。直しは別途)。
 - **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
   (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
   取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
@@ -527,6 +535,7 @@ grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録
 python3 scripts/wav_onsets.py captures/<タスク名>/out.wav 120 "4/4:0,8|3/4:4,8"   # 小節ごとに「拍子:鳴るステップ」
 python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24                  # 途切れない音(全ステップ ON など)
 ./scripts/sequencer-drum-wav.sh <タスク名> <Drum 一覧の行> <名前> <秒>            # sequencer のクリップを RPT ON で録る
+./scripts/sequencer-song-wav.sh <タスク名> <Song 一覧の行> <名前> <秒> [<ms> <タイル>]  # Song を頭から録る(指定すれば再生中にタイルをタップしてジャンプ。Phase 21e)
 ```
 
 - **期待時刻との突き合わせは「直前に一致した発音」を基準に追従させる。** Linux の WAV の時計は約 0.2% 進み、
@@ -539,6 +548,18 @@ python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24            
 - **全ステップ ON のような途切れない音は、しきい値交差では発音を区切れない**(Crash の減衰が重なり、包絡線が下がらない)。
   `wav_steps.py` は 16 分ごとに**「直前 10ms の谷 / 直後 16ms の山」の比**を追い、ステップ位置ごとの平均を出す。
   **どのステップも同じくらいの比(21d の実測で 3.5〜4.4)なら欠けは無い。**
+
+- **Song 全体の判定(Phase 21e)**: 先頭の小節が休符なら、`wav_onsets.py` は最初の立ち上がりを 0 とするので、**仕様は最初に鳴る小節から書く**。
+  小節ごとの拍子を並べれば、拍子の混在とクリップの切り詰め(Control を正とする)もそのまま判定できる。
+
+**内蔵音源と外部音源(MIDI OUT)の時間差(Phase 21e、roadmap U-22 の V6)**
+
+- **オーディオ I/F の L = マイク(実機の内蔵スピーカーの近く)、R = 外部音源のライン**で録る(同じ時計で比べられる。この環境では NEVA UNO、
+  `arecord -D plughw:<カード>,0 -f S16_LE -r 48000 -c 2`。マイクは INPUT1 にしか入らない)。
+- **同じ tick に置くと 2 つの音が重なって分けられない**ので、一時コードで**外部音源の Note On を既知の量(120bpm で 480 tick = 250ms)だけ後ろに予約**し、
+  `python3 scripts/v6_latency.py <wav> 250` で「R − L − 250ms」の分布を出す(正なら外部が遅い)。
+- **内蔵スピーカーは Kick が出ない**ので Snare で測る。外部音源の音色に 2 つ目のアタックがあると R が対になる(ME-1 の Snare は約 100ms 後)。
+- 先にレベルを見る: マイクは −30 dBFS 前後でも立ち上がりは拾える(SNR 30dB 台)。ラインは −15 dBFS 程度。
 
 **実機: カメラ録音 → WAV 抽出 → 同じ判定**
 
