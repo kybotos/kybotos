@@ -293,6 +293,10 @@ HOSTAPI_SEQ_OP_STOP(seq_write の status に指定する。Phase 17)
 > `transport_locate(0)` で song 位置 0 へ戻して `at_tick=0` の 1 エントリを
 > 上書きし続ける形にして回避した。要件 2 / 3 を長時間ループさせる段階で
 > 同じ制約が再燃しうる。
+>
+> **Phase 21c で音の出し先を CLICK から SYNTH へ移した**(`port:SYNTH, status:0x99`、
+> 小節頭 = note 34 Metronome Bell / 他 = 33 Metronome Click)。CLICK は「機能的なクリック」として
+> 装置の設定で既定 MUTE になったため。**語彙の追加なし**(SYNTH の note が 2 つ増えただけ)。
 
 ### 要件 2: 楽曲メトロノーム(セクション・途中テンポ変更・小節毎 PC)
 

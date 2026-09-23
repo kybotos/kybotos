@@ -254,10 +254,96 @@
 
 音への効き(WAV)はステップ 4 でまとめて確認する。
 ## ステップ 2: SYNTH に note 33 / 34
+
+- **両ホストの `voice_start_drum` に `case 33 / 34` を足した**(`VoiceKind` に `VK_WOOD`)。
+  **描画は Snare の経路(減衰サイン + 減衰ノイズ)を共有**し、`voice_render` の変更は分岐に `VK_WOOD` を並べただけ。
+  - 33 Click: サイン 1,200Hz / 60ms / 8,000 × g、ノイズ 3,000 × g を 4ms で e^-5 まで減衰
+  - 34 Bell: サイン 2,000Hz / 150ms / 同上
+  - **定数は両ホストで同一**(コメントで相互参照)。
+- 契約: `shared/hostapi_defs.h` に `HOSTAPI_SYNTH_NOTE_METRO_CLICK = 33` / `_BELL = 34` と文面
+  (**非破壊**、**Synth チャネルの値と MUTE が掛かり、Click の MUTE は効かない**)、`docs/hostapi.md` §5 の表。
+  **Host API の関数は増やしていない。**
+
 ## ステップ 3: アプリの手直し(sequencer / metronome / mp3player)
+
+- **再ビルドの前に、ソースを変えずに再ビルドした `.wasm` が既存とバイト一致することを確認した**
+  (metronome 3,910 / mp3player 2,942 / sequencer 43,705 B。rustc 1.95.0)。
+  → 以降のサイズ差はすべてコード変更によるもの。
+- **sequencer**: `CLICK_ON` / `T_CLICK` / `SYM_METRO` / `STA_CLICK_X` / `STA_CLICK_HIT_X` / cell 3 を削除。
+  `write_clicks` は常に積む。`T_ROW0` 6 → 5、`TEXTS` 29 → 28。**`STA_PLAY_HIT_X` 276 → 234**。
+- **metronome**: `seq_write(port=SYNTH, 0x99, 34 / 33, 127)`。`hostapi_tone_define` / `hostapi_audio_set_volume`、
+  `VOLUME` 一式、`apply_volume_delta`、`V-` / `V+` を削除。FINE 行は `-1` / `+1` の 2 枠(位置は据え置き)。
+- **mp3player**: `vol:`、`V-` / `V+`、`VOLUME`、`hostapi_audio_set_volume` を削除。ボタンは PLAY / PAUS / STOP の 3 枠(位置は据え置き)。
+
+| `.wasm` | 変更前 | 変更後 |
+|---|---|---|
+| metronome | 3,910 | **3,641** |
+| mp3player | 2,942 | **2,708** |
+| sequencer | 43,705 | **43,549** |
+
 ## 回帰の基準値の取り直し
+
+**Linux の WAMR プール消費(highmark)**:
+
+| アプリ | 21a / 21b | **21c** | |
+|---|---|---|---|
+| touch_demo | 15,944 | **15,944** | 同値(`.wasm` 不変) |
+| mp3player | 19,888 | **19,112** | 新基準(−776) |
+| metronome | 23,864 | **22,952** | 新基準(−912) |
+| midi_loopback | 29,120 | **29,120** | 同値(`.wasm` 不変) |
+| seq_smoke | 28,968 | **28,968** | 同値(`.wasm` 不変) |
+| sequencer | 153,720 | **153,288** | 新基準(−432) |
+
+**実機**:
+
+- 回帰は 6 本とも **`free_int` 151,752 / `largest_int` 102,400**(21b は 151,720 / 102,400。+32 B はホストのコード差)。
+- **sequencer のプール(起動直後の初回ロードで測定)**: **highmark 110,184 / 130,880、残り 20,696 B**
+  (21b は 112,424、残り 18,456 B)。**ゲート 4(2KB)に対して余裕が増えた**。
+  回帰の中では sequencer が初回ロードにならず highmark が壊れた値(4294967xxx)になるので、
+  リセット直後にシリアルの `run sequencer` で単独に測った(`captures/phase21c/pool.log`)。
+- **`device-regress.conf` は変更なし**(アプリごとの期待値を持っておらず、しきい値 146,000 / 98,304 の内側)。
+
 ## 検証(Linux の画面と WAV / 実機)
+
+**画面**(`captures/phase21c/*.png`):
+
+| # | 内容 | 結果 |
+|---|---|---|
+| V1 | ミキサーの 4 行にラベル箱、Master / MP3 / Synth / Click | **PASS**(`s1_open`) |
+| V2 | タップで MUTE ↔ 解除、アンミュートで元の値 | **PASS**(`s1_toggled` / `s1_master_back`) |
+| V3 | Click は起動直後からミュート | **PASS**(`s1_open`、`m1_synth_muted`) |
+| V4 | sequencer のステータス行にメトロノーム記号が無い / x 240 で ▶ | **PASS**(`q1_menu` に記号なし、`q1_playing` は x 240 のタップで再生開始 = ■) |
+| V5 | metronome / mp3player に Vol / V− / V+ が無い | **PASS**(`m1_app` / `mp3_app`) |
+
+**WAV**(`MIDIBOX_WAV_OUT`。goertzel は各オンセットの先頭 30ms):
+
+- **metronome**(`m1.wav`、既定 = Click MUTE のまま START):
+  - **V6 PASS**: 拍ごとにオンセット(500ms 間隔、120bpm)。**Click の MUTE に関係なく鳴る**。
+  - **V8 PASS**: **4 拍に 1 回だけ 2,000Hz が立ち**(1,283〜1,420)、他の拍は **1,200Hz**(877〜947)。
+    相手の帯は 5〜45 で、**帯域で完全に分かれる**。**長さも Bell ~125–130ms / Click ~50–55ms**(5% 減衰まで)。
+    ピークは両方とも ~4,400〜5,000(Master 50 × Synth 100)。
+  - **V9(metronome 側)PASS**: Synth を MUTE した区間(8.27〜13.77 秒)に**オンセット 0**、解除後に再開。
+- **sequencer**(`q1.wav`、Drum Machine のパターンを再生しながら Settings を操作。時刻は `q1_times.txt`):
+
+  | 区間 | 長さ | クリック音(1,000 / 1,568Hz)のオンセット | ドラム帯域のオンセット |
+  |---|---|---|---|
+  | 既定(Click MUTE) | 16.0s | **0** | 16 |
+  | Click をアンミュート | 4.4s | **9** | 5 |
+  | さらに Synth を MUTE | 4.4s | 8 | **0** |
+  | さらに Master を MUTE | 3.5s | **0**(35.21 → 39.21 秒の 4 秒間無音。境界の 1 発を除く) | 0 |
+  | Master をアンミュート | — | 再開 | 0(Synth は MUTE のまま) |
+
+  - **V7 PASS**(click は Click をアンミュートしたときだけ)、**V9 PASS**(Synth MUTE でドラムが消える)、
+    **V10 PASS**(Master MUTE で全体が消え、戻すと再開)。警告 0 件。
+
+**実機**: 焼き済み。**耳での確認はユーザー待ち**(V11)。
+
 ## 回帰(6 本)
+
+- **Linux ALL PASS**(`captures/phase21c/regress/`。6 本とも started / stopped 各 1、警告 0、残留なし)。
+  highmark は上の表。**既存 3 本は前フェーズと 1 バイトも同じ。**
+- **実機 ALL PASS**(`captures/phase21c-regress/report.md`、22 項目 / FAIL 0。全行 `free_int` 差分 +0、反復 3 回も同一、
+  許容外の WARN/ERROR 0 件)。
 ## 仕様からの逸脱
 ## 21d(操作規約の統一)と音色フェーズへの申し送り
 ## 残課題

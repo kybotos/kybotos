@@ -258,6 +258,25 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
   **`mousemove --window 0 0` してから `getmouselocation`** で原点を取る。
   合成クリック(`click --window`)は要求座標がそのまま届くので、この較正は要らない(21b)。
 
+## ミキサーの MUTE とアプリの音量 UI の整理(Phase 21c)
+
+- **値の通り道がフック 1 本なら、状態(MUTE)は共有コードで「実効値」に畳み込む。**
+  `master_ui` がホストへ `muted ? 0 : level` を渡すだけで、**両ホストのゲイン計算は 1 行も変えずに**
+  MUTE が効いた。ホストごとに MUTE を実装すると、同じ判断を 2 回書くことになる(11 の原則)(21c)。
+- **装置の設定を書く口は 1 本にする。** `hostapi_audio_set_volume` が `master_ui` を通らずに
+  マスター音量を直接書いていたため、**Master の MUTE を素通りし、オーバーレイの表示ともずれる**
+  状態だった。さらに Linux では最後に `Mix_VolumeMusic(v)` を**MP3 のゲインを掛けずに**呼び直しており、
+  アプリが音量を触ると MP3 だけミキサーが外れていた。**別経路の書き込みは、後から足した状態を知らない**(21c)。
+- **ゲインの既定を変える前に、そのゲインを通る経路をすべて洗う。** Click の MUTE は CLICK ポートだけでなく
+  **`hostapi_tone_play` / `hostapi_play_click` にも効く**(同じ `voice_start_tone` を通る)。
+  既定 MUTE にすると touch_demo のタップ音や seq_smoke のクリックも無音になる。
+  指示書は sequencer と metronome しか想定していなかった(roadmap U-25)(21c)。
+- **「回帰の基準」だったアプリを作り直すときは、先に無変更のソースで再ビルドしてバイト一致を見る。**
+  一致すれば、以降のサイズ・プール消費の差はすべてコード変更によるものと言える
+  (21c では metronome / mp3player / sequencer とも一致した)(21c)。
+- **描画スロットは描いた座標で初めて確保される。** 使わなくなった要素は空文字で描き続けるより
+  **定数ごと消す**ほうが、スロットを 1 つ持ち続けずに済む(sequencer の `T_CLICK`)(21c)。
+
 ## Sequencer コア(Phase 16)
 - **`Option<T>` の None は全ビット 0 とは限らない。** T の中に niche(`Option<TimeSig>` のタグの
   未使用値など)があると、外側の `Option` はそれを使って None を表す。`[Option<Session>; 64]` を
