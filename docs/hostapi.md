@@ -401,8 +401,10 @@ midi_loopback による確認を伴って行う:
 | `hostapi_position_t` | transport 位置。32 bytes(ABI 凍結) |
 | `hostapi_draw_text_rgb` | 色付きテキスト(Phase 18b。スロットは `draw_text` と共有) |
 
-**描画スロット(Phase 19a で拡張)**: `draw_text` / `draw_text_rgb` は **text 32 スロット**、
-`fill_rect` は **rect 24 スロット**(両ホスト同値。Phase 19a までは各 16)。
+**描画スロット(Phase 19a・21d で拡張)**: `draw_text` / `draw_text_rgb` は **text 80 スロット**、
+`fill_rect` は **rect 48 スロット**(両ホスト同値。Phase 19a までは各 16、21c までは 32 / 24。
+21d で sequencer のドラムのステップ編集 = 4 × 4 タイルと小節のインジケータのために引き上げた。ユーザー承認済み)。
+**使った分だけ LVGL オブジェクトが作られる**ので、既存アプリの消費は変わらない。
 **スロットは `(x, y)` で引かれ、アプリ実行中は解放されない**(アプリ停止でまとめて片付く)。
 `fill_rect` の `w` / `h` は毎回更新されるので、**`w = h = 0` で描けばそのスロットを消せる**
 (画面によって使う領域が入れ替わるときの常套手段。`docs/design/ui-conventions.md` §3.5)。

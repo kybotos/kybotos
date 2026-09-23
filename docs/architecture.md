@@ -367,6 +367,13 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
     必ず同一ファームで比べること。
   - **これ以降、プールの拡大は internal の天井に縛られない**(PSRAM 8MB 側の話になる)。
     増やしたら **`MIN_FREE_PSRAM` を見直すこと。**
+- **Phase 21a で 128KB、Phase 21d で 144KB にした(いずれもユーザー承認済み)。**
+  21d は Drum クリップのバンク化と編集画面で `sequencer.wasm` が 43,549 → 52,751 B になり、
+  **128KB では instantiate が「allocate memory failed」**。144KB でプール消費 **128,624 / 147,264(残り 18,640 B)**。
+  停止時 `free_int` 150,696 / `largest_int` 102,400 は変わらず、`free_psram` は 8,169,436
+  (`MIN_FREE_PSRAM=8,000,000` まで 169KB)。**実行中は linear memory が Bank の拡大(+約 77KB)ぶん増え、
+  `free_psram` は 7,991,252 まで下がる**(回帰は停止時の値で判定するので影響しない)。
+  Linux ホストのプールは 192KB → 256KB(消費 182,720 B)。
 
 - **プール消費は `.wasm` の増分の約 3 倍で増える**(18a 以降の実測)。
   Phase 20 以降でさらに増えるなら、**U-6(`.wasm` バッファを PSRAM へ)で internal を取り戻してから**
@@ -383,7 +390,7 @@ t_i ≈ T - (N - 1 - i) × 320µs      (T = ホストが打った代表時刻)
 | LVGL 描画バッファ(19,200 B ×2) | **PSRAM** | `esp_lvgl_port` の `MALLOC_CAP_DEFAULT` | Phase 15 L-a。`psram_dma_direct=1` とセット(下記) |
 | L0 キュー(4,096 B) | **internal 固定** | `shared/seq_core.c` の静的 BSS | 6B / 7B-fix / 9c |
 | テンポマップ・拍子マップ・L1 の状態 | **internal 固定** | 同上 | 同上 |
-| WAMR プール(**114,688 B**) | **PSRAM(Phase 21 で移した)** | `wasm_runtime.cpp` で `heap_caps_aligned_alloc(16, …, MALLOC_CAP_SPIRAM)` | 7B-fix → 18c → **21**(下記) |
+| WAMR プール(**147,456 B**。21 で 112KB、21a で 128KB、21d で 144KB) | **PSRAM(Phase 21 で移した)** | `wasm_runtime.cpp` で `heap_caps_aligned_alloc(16, …, MALLOC_CAP_SPIRAM)` | 7B-fix → 18c → **21**(下記) |
 | `.wasm` バッファ | **internal**(現状) | `malloc()`(`CAPS_ALLOC` では internal) | Phase 15。**いずれかの `.wasm` が 16KB を超えたら PSRAM へ移す**(B 案) |
 | クリック / シリアルコンソールのタスクスタック | **internal 固定** | `xTaskCreateStatic` + 静的 BSS | 12 |
 | `xTaskCreate` 組のタスクスタック | **internal 固定** | IDF の既定 | `FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` は `xTaskCreateStatic` にしか効かない |
