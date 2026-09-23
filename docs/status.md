@@ -783,3 +783,23 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     B-2 metronome / mp3player が音量の初期値 98 をキャッシュしていて表示がずれる、
     B-3 ランチャーでは上端スワイプが効かない(`Settings` 行があるので実害なし)、
     B-4 ブラウザ版では上端スワイプが使えない見込み。
+
+- **Phase 21c(docs/prompts/phase21c.md、ミキサーの MUTE と、アプリ側の音量 UI の整理)完了(2026-09-23)。**
+  詳細は `docs/results/phase21c.md`。**「音量と鳴らす / 鳴らさないは Settings で決める」に一本化した。**
+  - **ミキサーの各行に MUTE**。**ラベルそのものがトグル**(箱付き。緑 = 鳴る / 灰 = MUTE、値とバーも灰)。
+    **MUTE は値と別のフラグ**でアンミュートで元の値に戻る。**`master_ui` がホストへ実効値(MUTE 中は 0)を渡す**ので
+    ホストのゲイン計算は不変。**既定で MUTE なのは Click だけ**。「Drums」→「**Synth**」に改名。
+  - **`hostapi_audio_set_volume` を `master_ui` 経由にした**(Master の MUTE を素通りしないように。
+    Linux の既存不具合 — アプリの音量変更で MP3 のミキサーゲインが外れる — も消えた)。
+  - **SYNTH に note 33 Metronome Click / 34 Metronome Bell を追加**(非破壊。Host API の関数は増えない)。
+    Snare の描画経路を流用した「減衰サイン + 4ms のノイズ」、Click 1,200Hz / 60ms、Bell 2,000Hz / 150ms。
+  - **アプリの手直し**(`.wasm` を再ビルド。無変更ソースでのバイト一致を先に確認):
+    **sequencer** はメトロノームボタンを削除(click は常に積み、Click MUTE が決める。▶ / ■ の的を x 234 まで拡大)、
+    **metronome** は音を SYNTH の 34 / 33 へ移して Vol / V− / V+ を削除、**mp3player** は vol / V− / V+ を削除。
+    **metronome の拍の音は楽器(Synth)扱いで、Click の設定は効かない**(ユーザー判断)。
+  - **検証**: Linux の画面と WAV で V1〜V10 PASS(Click 既定 MUTE で sequencer の click 0 発 → アンミュートで鳴る、
+    Synth MUTE でドラムと metronome が消える、34 / 33 は 2,000 / 1,200Hz で完全に分離)。**実機はユーザーが試聴して OK**。
+  - **回帰 6 本 ALL PASS**(実機 22 項目 / Linux)。既存 3 本の highmark は不変、新基準は mp3player 19,112 /
+    metronome 22,952 / sequencer 153,288(Linux)。実機の sequencer プール残り **20,696 B**(21b は 18,456)。
+  - **残課題**: C-1 touch_demo / seq_smoke / synth_probe のクリックが既定で鳴らない(**roadmap U-25** に起票)、
+    C-2 設定が電源で消える(U-24)。
