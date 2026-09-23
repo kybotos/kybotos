@@ -1018,7 +1018,7 @@ static void draw_char8x8(int32_t x, int32_t y, unsigned char c)
 /* Phase 18b: 実機のフォント(LVGL Montserrat + FontAwesome サブセット)にある
  * U+F04B(▶)/ U+F04D(■)は DejaVu に無い。アプリが両ホストで同じバイト列を書けるよう、
  * これらだけホスト側が図形として描く。戻り値は進めた幅(px)、0 = 記号ではない。
- * Phase 19a で U+F00D(✕、タイルの削除)を追加した */
+ * Phase 19a で U+F00D(✕、タイルの削除)、Phase 21f で U+F079(⟲、リピートのトグル)を追加した */
 #define SYM_W 12
 static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
 {
@@ -1067,6 +1067,20 @@ static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
             r.w = 1;
             r.h = h;
             SDL_RenderFillRect(s_renderer, &r);
+        }
+        return SYM_W;
+    }
+    if (p[2] == 0xB9) { /* U+F079 ⟲(Phase 21f、`RPT` のトグル): 上の辺は右向き、下の辺は左向きの矢印で輪を作る */
+        r.w = 7; r.h = 2;
+        r.x = x + 2; r.y = y + 2;  SDL_RenderFillRect(s_renderer, &r); /* 上の辺 */
+        r.x = x + 3; r.y = y + 9;  SDL_RenderFillRect(s_renderer, &r); /* 下の辺 */
+        r.w = 2; r.h = 5;
+        r.x = x + 1;  r.y = y + 2; SDL_RenderFillRect(s_renderer, &r); /* 左の辺(上から下りる) */
+        r.x = x + 9;  r.y = y + 5; SDL_RenderFillRect(s_renderer, &r); /* 右の辺(下から上る) */
+        for (i = 0; i < 3; ++i) {  /* 矢じり: 上の辺の右端(右向き)、下の辺の左端(左向き) */
+            r.w = 1; r.h = 1 + 2 * (2 - i);
+            r.x = x + 9 + i;  r.y = y + 1 + i; SDL_RenderFillRect(s_renderer, &r);
+            r.x = x + 2 - i;  r.y = y + 8 + i; SDL_RenderFillRect(s_renderer, &r);
         }
         return SYM_W;
     }

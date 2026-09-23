@@ -841,3 +841,15 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **回帰 6 本 ALL PASS**(実機・Linux)。既存 5 本の Linux highmark は不変、sequencer は 213,448。
   - **21f への申し送り**: Chapter のグリッドに `1` / `RPT` を置いて再生(`1` = Chapter。ON なら Chapter を 1 回 / リピート、
     OFF なら Song の最後まで / Song をリピート)、再生中の Drum の編集。
+- **Phase 21f(docs/prompts/phase21f.md、Chapter のグリッドから再生する + 再生中の Drum 編集)完了(2026-09-23)。**
+  詳細は `docs/results/phase21f.md`。
+  - **Song のトグル**: `Scope::Song { song, chapter(= arrangement の枠), repeat }`。arrangement とグリッドに **`1` / ⟲**
+    (`1` ON + ⟲ ON = Chapter ループ、`1` ON = Chapter を 1 回、`1` OFF = その枠から最後まで、⟲ ON なら **Song の頭**へ戻る)。
+    ループの境界は同じ Session でもキュー PC を送る。ジャンプするとループの対象も移る。**spec Q7 を決着**。
+  - **`1` / ⟲(U+F079、旧 `RPT`)は全画面で ▶ の左**(ユーザー指示。Linux ホストに ⟲ の図形を追加 = 承認済み)。実機の試用で ⟲ が ▶ に近すぎたので離し、間に反応しない帯を入れた。
+  - **再生中も Drum のマスを編集できる**(次の小節を積み直す)。グリッドの**追従**。**再生中の変更で次の小節の PC が変わると古い PC が残る潜在バグ(19a から)を直した**。
+  - `.wasm` 62,445 → **64,771 B**、実機プール 176KB のまま(highmark 155,088、168KB でも起動 = 余裕 8KB 超)、Linux 221,440。text スロット 76 → 78 / 80。seqcore のテスト **149 → 160**。
+  - **検証**: Linux の WAV で SG04 の Chapter ループ 3 周 **118 / 118**、Song リピート **91 / 91**、Chapter 1 回 **33 / 33**、再生中の編集 **133 / 133**(対象の小節の 0.15〜0.27 秒前に確定して 1 周目から鳴る)。
+    Linux の MIDI で PC の送り直し(時刻前 / 送信後 / 締め切り後)を確認。
+    **実機はユーザーが一部を試用し OK(SL MK3 の動作は時間の都合で見ていない。残課題 R-1)**。
+  - **回帰 6 本 ALL PASS**(実機・Linux)。既存 5 本の Linux highmark は不変。
