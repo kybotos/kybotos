@@ -536,6 +536,10 @@ python3 scripts/wav_onsets.py captures/<タスク名>/out.wav 120 "4/4:0,8|3/4:4
 python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24                  # 途切れない音(全ステップ ON など)
 ./scripts/sequencer-drum-wav.sh <タスク名> <Drum 一覧の行> <名前> <秒>            # sequencer のクリップを RPT ON で録る
 ./scripts/sequencer-song-wav.sh <タスク名> <Song 一覧の行> <名前> <秒> [<ms> <タイル>]  # Song を頭から録る(指定すれば再生中にタイルをタップしてジャンプ。Phase 21e)
+./scripts/sequencer-grid-wav.sh <タスク名> <Song 一覧の行> <タイル> <1> <RPT> <名前> <秒> [<ms> <マスの行> <一覧の行>]
+                                  # Chapter のグリッドからトグルを決めて録る(指定すれば再生中に Drum のマスを編集し、▶ からの秒数を .times に残す。Phase 21f)
+./scripts/sequencer-grid-pc.sh <タスク名> <Song 一覧の行> <タイル> <1> <RPT> <ms> <名前> <秒>
+                                  # グリッドから再生し、▶ から ms 後に `1` を押して、PC を aseqdump で記録する(Phase 21f)
 ```
 
 - **期待時刻との突き合わせは「直前に一致した発音」を基準に追従させる。** Linux の WAV の時計は約 0.2% 進み、
@@ -549,6 +553,9 @@ python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24            
   `wav_steps.py` は 16 分ごとに**「直前 10ms の谷 / 直後 16ms の山」の比**を追い、ステップ位置ごとの平均を出す。
   **どのステップも同じくらいの比(21d の実測で 3.5〜4.4)なら欠けは無い。**
 
+- **再生中の操作の検証(Phase 21f)**: 「次の小節から効くか」は**操作した時刻がその小節を積んだ後かどうか**で意味が変わる。
+  スクリプトが残す「▶ から操作までの秒数」と小節の頭の時刻を突き合わせてから、WAV の一致を読む。
+  PC は `sequencer-grid-pc.sh` の aseqdump の出力で **PC の前の Clock を数える**と、どの境界の何拍前に出たかが分かる(PC は境界の 24 クロック前が正常)。
 - **Song 全体の判定(Phase 21e)**: 先頭の小節が休符なら、`wav_onsets.py` は最初の立ち上がりを 0 とするので、**仕様は最初に鳴る小節から書く**。
   小節ごとの拍子を並べれば、拍子の混在とクリップの切り詰め(Control を正とする)もそのまま判定できる。
 
