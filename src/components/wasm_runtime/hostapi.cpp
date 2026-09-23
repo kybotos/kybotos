@@ -28,7 +28,7 @@ static const char* TAG = "WASM/API";
 namespace {
 
 constexpr int kMaxTextSlots = 80; // Phase 19a: 16 → 32、Phase 21d: 32 → 80(ドラムの 4 × 4 タイル + 小節表示。Linux と同値)
-constexpr int kMaxRectSlots = 48; // Phase 19a: 16 → 24、Phase 21d: 24 → 48(Linux と同値)
+constexpr int kMaxRectSlots = 80; // Phase 19a: 16 → 24、Phase 21d: 24 → 48、Phase 21e: 48 → 80(Linux と同値)
 constexpr uint32_t kMaxTextLen = 63;
 constexpr int kEventQueueDepth = 16;
 

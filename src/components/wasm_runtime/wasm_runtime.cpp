@@ -73,7 +73,13 @@ static const char* TAG = "WASM";
 // **Phase 21d で 144KB にした(ユーザー承認済み。承認は 160KB まで)。** Drum クリップのバンク化と
 // 編集画面を積んだ sequencer(`.wasm` 52,751 B)は **128KB では instantiate が
 // 「allocate memory failed」**になった。
-static constexpr size_t kWamrPoolBytes = 144 * 1024;
+//
+// **Phase 21e で 176KB にした(ユーザー承認済み)。** Chapter のグリッドと Drum の列を積んだ
+// sequencer(`.wasm` 62,445 B、21d から +9.7KB)は **160KB では `create_exec_env failed`**、
+// 168KB で起動した(highmark 148,280)。**160KB で落ちたので「total − highmark」の残りは当てにならず**、
+// 168KB の本当の余裕は 8KB 以下としか言えない。ゲート(残り 2KB)を確実に満たすため 1 段上の 176KB にした
+// (docs/results/phase21e.md「.wasm サイズと WAMR プール」)。
+static constexpr size_t kWamrPoolBytes = 176 * 1024;
 static uint8_t* s_wamr_heap = nullptr;
 
 namespace wasmrt {
