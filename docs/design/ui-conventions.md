@@ -1,7 +1,7 @@
-# MidiAppBox 対話規約(UI conventions)
+# Kybotos 対話規約(UI conventions)
 
 - 確定: Phase 18a(2026-09-20、承認済み)。記録は `docs/results/phase16-21-platform.md` §4
-- 対象: **MidiAppBox 上で動く全アプリ**。アプリ固有の画面設計は各アプリの仕様書
+- 対象: **Kybotos 上で動く全アプリ**。アプリ固有の画面設計は各アプリの仕様書
   (`docs/apps/<app>/`)に置き、本書は「どのアプリでも同じにする操作の語彙」だけを決める
 - 実装: ジェスチャ判定と画面スタックは **`wasm-apps/appui`**(no_std crate)。
   ホストは生のイベントだけを渡す(ホストごとの解釈差を作らない。`docs/architecture.md` §11-11)

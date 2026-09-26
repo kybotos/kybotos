@@ -6,8 +6,8 @@ lsp:
     server: clangd
     launch_command: >
       /usr/local/bin/clangd-with-idf
-      --compile-commands-dir=/workspaces/MidiAppBox/src/build
-    launch_parameters: [ "-w", "/workspaces/MidiAppBox" ]
+      --compile-commands-dir=/workspaces/kybotos/src/build
+    launch_parameters: [ "-w", "/workspaces/kybotos" ]
   mappings:
     - source: .
-      destination: /workspaces/MidiAppBox
+      destination: /workspaces/kybotos

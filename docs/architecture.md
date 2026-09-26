@@ -515,7 +515,7 @@ largest free block が動かなかったのは、そこがもう linear memory �
 - WASM linear memory・LVGL 描画バッファは PSRAM へ(§9 の表)。L0/L1・テンポマップ・
   WAMR プール・タスクスタック・DMA バッファは internal 固定のまま(§9 の方針は不変)。
 - **SDMMC プローブは恒久的にスキップし、SD は SDSPI 固定**
-  (`CONFIG_MIDIBOX_SD_SKIP_SDMMC_PROBE`、既定 `y if SPIRAM`)。理由は下記。
+  (`CONFIG_KYBOTOS_SD_SKIP_SDMMC_PROBE`、既定 `y if SPIRAM`)。理由は下記。
 
 **実測結果(絶対値目標、Phase 13 と同一条件)**:
 

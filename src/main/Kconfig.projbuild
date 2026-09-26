@@ -1,6 +1,6 @@
-menu "MidiAppBox"
+menu "Kybotos"
 
-    config MIDIBOX_WASM_CYCLE_TEST
+    config KYBOTOS_WASM_CYCLE_TEST
         bool "Run app start/stop cycle test at boot (leak check)"
         default n
         help
@@ -9,18 +9,18 @@ menu "MidiAppBox"
             mid-cycle (logging free heap per cycle) and a corrupted-wasm
             load test. For leak verification (Phase 5C/6B).
 
-    config MIDIBOX_SERIAL_CMD
+    config KYBOTOS_SERIAL_CMD
         bool "Enable the serial command console (USB Serial/JTAG)"
         default y
         help
             Read one-line commands from the USB Serial/JTAG port and answer
-            with log lines tagged MBCMD. Used by scripts/device-regress.sh to
+            with log lines tagged KBCMD. Used by scripts/device-regress.sh to
             run the on-device regression without touching the screen:
             ping / ls / run <app> / stop / heap.
             The touch and power-key paths are unaffected.
 
 
-    config MIDIBOX_SD_SKIP_SDMMC_PROBE
+    config KYBOTOS_SD_SKIP_SDMMC_PROBE
         bool "Skip the SDMMC probe and mount the SD card via SDSPI directly"
         default y if SPIRAM
         default n
@@ -39,33 +39,33 @@ menu "MidiAppBox"
             Phase 15 step 4 investigates why the probe hangs. Revisit this
             default once that has an answer.
 
-    config MIDIBOX_SCREENSAVER
+    config KYBOTOS_SCREENSAVER
         bool "Blank the launcher menu when idle (screensaver / backlight off)"
         default y
         help
             While the launcher menu is on screen (no WASM app running), show a
             black screensaver with a slowly drifting dot after
-            MIDIBOX_SCREENSAVER_SEC without a touch, then turn the LCD
-            backlight off after MIDIBOX_BACKLIGHT_OFF_SEC. This avoids the
+            KYBOTOS_SCREENSAVER_SEC without a touch, then turn the LCD
+            backlight off after KYBOTOS_BACKLIGHT_OFF_SEC. This avoids the
             image retention that a permanently displayed menu causes.
             A touch (or a short power-key press) restores the menu; the waking
             touch is swallowed by the screensaver overlay so it cannot launch
             an app by accident. Running apps are never affected: the timers
             only act while the menu screen is the active screen.
 
-    config MIDIBOX_SCREENSAVER_SEC
+    config KYBOTOS_SCREENSAVER_SEC
         int "Idle seconds before the screensaver starts"
-        depends on MIDIBOX_SCREENSAVER
+        depends on KYBOTOS_SCREENSAVER
         range 5 3600
         default 60
 
-    config MIDIBOX_BACKLIGHT_OFF_SEC
+    config KYBOTOS_BACKLIGHT_OFF_SEC
         int "Idle seconds before the backlight turns off"
-        depends on MIDIBOX_SCREENSAVER
+        depends on KYBOTOS_SCREENSAVER
         range 5 7200
         default 180
         help
             Counted from the same idle timer as the screensaver, so it must be
-            larger than MIDIBOX_SCREENSAVER_SEC to have a screensaver stage.
+            larger than KYBOTOS_SCREENSAVER_SEC to have a screensaver stage.
 
 endmenu

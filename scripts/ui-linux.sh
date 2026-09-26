@@ -8,7 +8,7 @@
 #   ui-linux.sh key   KEY            キー送信(Escape = 強制終了、BackSpace = 戻る)
 #   ui-linux.sh shot  NAME           静止画を $UI_CAPTURE_DIR/NAME.png に撮る(既定 captures/ui)
 #
-# 座標は**アプリの論理座標(320x240)**。ウィンドウは midibox_host の pid と一致するものを選ぶ
+# 座標は**アプリの論理座標(320x240)**。ウィンドウは kybotos_host の pid と一致するものを選ぶ
 # (docs/workflow.md §3.6)。合成クリックは要求したウィンドウ座標がそのまま届く(×2 = WINDOW_SCALE)。
 # **ドラッグは実ポインタを動かすので絶対座標**で、`mousemove --window 0 0` → `getmouselocation` で
 # クライアント原点を較正してから動かす(docs/lessons.md Phase 21b)。
@@ -16,10 +16,10 @@ set -u
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${UI_CAPTURE_DIR:-$REPO/captures/ui}
 export DISPLAY=${DISPLAY:-:0}
-pid=$(pgrep -x midibox_host | head -1)
-[ -z "$pid" ] && { echo "ui-linux: midibox_host is not running" >&2; exit 1; }
+pid=$(pgrep -x kybotos_host | head -1)
+[ -z "$pid" ] && { echo "ui-linux: kybotos_host is not running" >&2; exit 1; }
 WIN=""
-for w in $(xdotool search --name "MidiAppBox WASM host"); do
+for w in $(xdotool search --name "Kybotos host"); do
   [ "$(xdotool getwindowpid "$w" 2>/dev/null)" = "$pid" ] && WIN=$w
 done
 [ -z "$WIN" ] && { echo "ui-linux: window not found" >&2; exit 1; }

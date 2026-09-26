@@ -1,4 +1,4 @@
-# MidiAppBox 標準開発ワークフロー(リファレンス)
+# Kybotos 標準開発ワークフロー(リファレンス)
 
 ## 位置づけ
 
@@ -12,7 +12,7 @@
   - **§2–3 推奨手順**: 既定の具体的なやり方。改善してよいが、**実行前に**差分と理由を
     提示して承認を得ること。承認なしに別のやり方へ置き換えない(試行錯誤で
     別解を探ることも含めて禁止)。承認されて成功したら本書と CLAUDE.md を更新する。
-- **本書に書くのは MidiAppBox 全体の開発に関わることだけ**(ビルド / フラッシュ / モニタ、
+- **本書に書くのは Kybotos 全体の開発に関わることだけ**(ビルド / フラッシュ / モニタ、
   回帰、測定、画面キャプチャなど、**どのアプリの開発でも使う手順**)。
   **特定のアプリに依存する手順・レイアウト・判断は本書に書かない。** 必要になったら
   そのアプリの仕様書(`docs/apps/<app>/`)か該当フェーズの `docs/results/` に置き、
@@ -156,20 +156,20 @@ rm -rf hosts/linux/build
 
 # 単発実行モードで起動(常駐なので send。DISPLAY を付ける)
 ./scripts/hpane.sh send unix-build \
-  "cd <repo>/hosts/linux && DISPLAY=:0 ./build/midibox_host ../../wasm-apps/metronome/metronome.wasm"
+  "cd <repo>/hosts/linux && DISPLAY=:0 ./build/kybotos_host ../../wasm-apps/metronome/metronome.wasm"
 ./scripts/hpane.sh waitfor unix-build "app started" 15000
 
 # 数秒動作させたのち、ESC キー送信で終了(キー送信は信頼できる。クリックは不可)
-xdotool search --name "MidiAppBox WASM host"   # → <window id>(複数ヒットすることがある)
+xdotool search --name "Kybotos host"   # → <window id>(複数ヒットすることがある)
 # 複数ヒットした場合は無関係なウィンドウ(mutter-x11-frames 等の装飾ウィンドウが
 # 誤って一致することがある)が混ざっていないか、対象 pid と突き合わせて確認する:
 #   for w in <window id...>; do xdotool getwindowpid $w; done
-#   pgrep -af midibox_host   # ここで得た pid と一致するものを選ぶ
+#   pgrep -af kybotos_host   # ここで得た pid と一致するものを選ぶ
 xdotool key --window <window id> Escape
 
 # 確認
 ./scripts/hpane.sh read unix-build 60          # app started → single mode → app stopped
-pgrep -af midibox_host                          # 残留なしを確認(何も出ない)
+pgrep -af kybotos_host                          # 残留なしを確認(何も出ない)
 ```
 
 - **ホストの出力をパイプ(`| tee` 等)に通さない。** stdout がブロックバッファされ、
@@ -177,7 +177,7 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
   ときは **stderr だけリダイレクト**する(`2> <file>`。`app started` / `app stopped` は stdout)。
 - **`waitfor` はスクロールバックにも一致する。** 同じペインで同じアプリを続けて起動すると
   前回の `app started` を拾う。アプリ名を含めた文字列で待つか(`app started: ../../wasm-apps/<app>`)、
-  `pgrep -x midibox_host` で実際に起動したことを確かめる(§3.4 と同じ趣旨)。
+  `pgrep -x kybotos_host` で実際に起動したことを確かめる(§3.4 と同じ趣旨)。
 - 画面を撮って確認したいときは §3.6。
 - **ホスト非依存のコードは Linux でテストしてから実機へ行く**(実機・Linux の両方で同じ結果になる部分を、
   安い側で先に潰す)。
@@ -235,14 +235,14 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
 ```bash
 # ビルド(README のタグの生イメージを都度起動。export.sh を明示 source)
 ./scripts/hpane.sh run esp32-build \
-  "docker run --rm -v <repo>:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/src \
+  "docker run --rm -v <repo>:/workspaces/kybotos -w /workspaces/kybotos/src \
    ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
    bash -c 'source /opt/esp-idf/export.sh && idf.py build'" 1800000
 
 # フラッシュ(--device=/dev/ttyACM0 --group-add <dialout gid> を付けた
 # docker run --rm -it を都度起動。monitor 同様 -it 必須)
 ./scripts/hpane.sh run esp32-build \
-  "docker run --rm -it -v <repo>:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/src \
+  "docker run --rm -it -v <repo>:/workspaces/kybotos -w /workspaces/kybotos/src \
    --device=/dev/ttyACM0 --group-add <dialout gid> \
    ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
    bash -c 'source /opt/esp-idf/export.sh && idf.py -p /dev/ttyACM0 flash'" 300000
@@ -251,10 +251,10 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
 # 等)に出す。コンテナ内一時パス(/tmp 等)は --rm で消え、herdr の
 # スクロールバックも高頻度ログですぐ埋まるため、ホスト側ファイルで確認する。
 ./scripts/hpane.sh send esp32-monitor \
-  "docker run --rm -it -v <repo>:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/src \
+  "docker run --rm -it -v <repo>:/workspaces/kybotos -w /workspaces/kybotos/src \
    --device=/dev/ttyACM0 --group-add <dialout gid> \
    ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
-   bash -c 'source /opt/esp-idf/export.sh && PYTHONUNBUFFERED=1 idf.py -p /dev/ttyACM0 monitor | tee /workspaces/MidiAppBox/captures/<タスク名>/monitor.log'"
+   bash -c 'source /opt/esp-idf/export.sh && PYTHONUNBUFFERED=1 idf.py -p /dev/ttyACM0 monitor | tee /workspaces/kybotos/captures/<タスク名>/monitor.log'"
 ./scripts/hpane.sh waitfor esp32-monitor "app_main" 60000
 ```
 
@@ -307,7 +307,7 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
 **ユーザーの物理操作は不要。**
 
 ```bash
-# ファームウェアは CONFIG_MIDIBOX_SERIAL_CMD=y(既定)でビルド・フラッシュ済みのこと
+# ファームウェアは CONFIG_KYBOTOS_SERIAL_CMD=y(既定)でビルド・フラッシュ済みのこと
 ./scripts/device-regress.sh --task <タスク名>
 # → captures/<タスク名>/monitor.log と report.md。exit 0 が合格
 ```
@@ -322,7 +322,7 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
 - **保持中にアプリが自分で止まると「停止しない」と判定される。** スクリプトは
   「自分が送った `stop` の後の停止行」を待つので、それより前に止まっていると空振りする
   (このとき `stop` の応答は `stop idle`)。**電源キーの短押しはログを出さずにアプリを止める**ので、
-  1 回の FAIL で結論を出さず、`monitor.log` の時系列(`MBCMD: stop ok` の有無)を見てから再実行する
+  1 回の FAIL で結論を出さず、`monitor.log` の時系列(`KBCMD: stop ok` の有無)を見てから再実行する
   (Phase 18 で実際に 1 回だけ出て、再実行では再現しなかった)。
 - **実機の回帰と Linux ホストの回帰を同時に走らせない。** 実機が UM-ONE へ流した MIDI を
   Linux ホストが受け、ドレインしないアプリ(touch_demo 等)で `midi: RX ring buffer full` が
@@ -340,13 +340,13 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
       --mount <外の repo>:/workspaces/<名前> --build-dir /workspaces/<名前>/build/fw
   ```
 - 実機側の受け口は USB Serial/JTAG のコマンドコンソール
-  (`ping` / `ls` / `run <app>` / `stop` / `heap`。応答はタグ `MBCMD` のログ行)。
+  (`ping` / `ls` / `run <app>` / `stop` / `heap`。応答はタグ `KBCMD` のログ行)。
   **タッチ・電源キーの既存操作系は変更していない。**
 - アプリ内 UI 操作(metronome の START/STOP 等)は自動化していない。音・画面の
   確認は §3.3 の人間操作+カメラのまま。
 - **手で起動したモニタが残ったまま走らせない。** スクリプトはポートを掴んだコンテナを kill してから
   `esp32-monitor` ペインへ新しいモニタの起動コマンドを送るが、**ペインがまだ前のモニタに繋がっていると、
-  そのコマンドが実機のシリアル入力に流れる**(実機ログに `MBCMD: err unknown command ...`、
+  そのコマンドが実機のシリアル入力に流れる**(実機ログに `KBCMD: err unknown command ...`、
   回帰は「serial command console did not come up」で FAIL。Phase 21d で 1 回踏んだ)。
   **先に `docker kill <モニタのコンテナ>` し、`hpane.sh read esp32-monitor` でプロンプトに戻ったのを見てから**走らせる。
   止めるコンテナは **`idf.py monitor` を走らせているものだけ**にする。`docker ps -q` 全部を kill しない(無関係のコンテナまで止まる)。
@@ -362,10 +362,10 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
 - **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
   (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
   取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
-  `MBCMD: ready` の後にシリアルから `run <app>` を 1 回だけ送る**(Phase 21c で導入)。
+  `KBCMD: ready` の後にシリアルから `run <app>` を 1 回だけ送る**(Phase 21c で導入)。
   ```bash
   ./scripts/hpane.sh send esp32-monitor "<§3.2 のモニタ起動コマンド(tee 先は captures/<タスク名>/pool.log)>"
-  # ログファイルに `MBCMD: ready` が出るのを待ってから
+  # ログファイルに `KBCMD: ready` が出るのを待ってから
   ./scripts/hpane.sh send esp32-monitor "run <app>"
   grep -a "wamr pool" captures/<タスク名>/pool.log   # total / free / highmark
   ./scripts/hpane.sh send esp32-monitor "stop"
@@ -401,7 +401,7 @@ min/mean/max・ヒストグラム・外れ値・見かけ BPM の分布・0xFA/0
 - 実体は `tools/midi_clock_probe/`(C の受信プローブ + Python の集計)。
   ビルドはラッパが必要なときだけ行う(成果物は .gitignore 対象)。
 - 接続先は既定で名前に `UM-ONE` を含むポート。`--port <部分一致>` で変更でき、
-  Linux ホスト自身の出力を測るときは `--port MidiAppBox` を使う。
+  Linux ホスト自身の出力を測るときは `--port Kybotos` を使う。
   測定対象を後から起動する場合は `--wait <秒>` を付ける。
 - 打刻は **ALSA のカーネル側(real-time キュー)を主**、受信ループの
   `CLOCK_MONOTONIC` を副として両方 CSV に残す。出力表の「カーネル打刻とユーザ打刻の差」が
@@ -429,7 +429,7 @@ min/mean/max・ヒストグラム・外れ値・見かけ BPM の分布・0xFA/0
 
 **x11grab は使わない。** 画面全体(ルートウィンドウ)を読むため、この環境(Wayland + XWayland /
 GNOME)では常に黒くなる。**ウィンドウ ID を指定して読めば取れる**(静止画は ImageMagick の
-`import -window`、録画は `xwd -id` の連続取得)。対象ウィンドウは **`midibox_host` の pid と
+`import -window`、録画は `xwd -id` の連続取得)。対象ウィンドウは **`kybotos_host` の pid と
 `xdotool getwindowpid` の一致**で選ぶ(同名のフレーム窓は mutter のもの)。この選択はスクリプトが行う。
 
 ```bash
@@ -456,8 +456,8 @@ GNOME)では常に黒くなる。**ウィンドウ ID を指定して読めば�
 意図どおり届いた)。座標は **論理座標 ×2**(`hostapi_sdl.c` の `WINDOW_SCALE`)。
 
 ```bash
-pid=$(pgrep -x midibox_host | head -1)
-for w in $(DISPLAY=:0 xdotool search --name "MidiAppBox WASM host"); do
+pid=$(pgrep -x kybotos_host | head -1)
+for w in $(DISPLAY=:0 xdotool search --name "Kybotos host"); do
   [ "$(DISPLAY=:0 xdotool getwindowpid "$w")" = "$pid" ] && WIN=$w
 done
 DISPLAY=:0 xdotool mousemove --window "$WIN" <論理x*2> <論理y*2>; sleep 0.3
@@ -498,14 +498,14 @@ DISPLAY=:0 xdotool click --window "$WIN" 1
 ```bash
 # 1) 起動。**出力はログファイルへ**(ペインのスクロールバックに誤マッチさせないため)
 ./scripts/hpane.sh send unix-build \
-  "cd <repo>/hosts/linux && DISPLAY=:0 ./build/midibox_host ../../wasm-apps/<app>/<app>.wasm \
+  "cd <repo>/hosts/linux && DISPLAY=:0 ./build/kybotos_host ../../wasm-apps/<app>/<app>.wasm \
    > <repo>/captures/<タスク名>/regress/<app>.log 2>&1"
 # 2) 起動したことは **pgrep** で確かめる(`waitfor` は前回の行に一致しうる)
-until pgrep -x midibox_host >/dev/null; do sleep 0.25; done
+until pgrep -x kybotos_host >/dev/null; do sleep 0.25; done
 sleep 5
 # 3) pid と一致するウィンドウへ ESC(§3.1 と同じ選び方)
 DISPLAY=:0 xdotool key --window <win> Escape
-until ! pgrep -x midibox_host >/dev/null; do sleep 0.25; done
+until ! pgrep -x kybotos_host >/dev/null; do sleep 0.25; done
 # 4) ログで判定
 grep -c "app started" <app>.log; grep -c "app stopped" <app>.log
 grep -cE "no free slot|WARN|ERROR" <app>.log     # 0 であること
@@ -530,8 +530,8 @@ grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録
 ```bash
 # ミキサの出力をそのまま WAV に追記する。環境変数が無ければ従来どおり何も書かない
 ./scripts/hpane.sh run unix-build \
-  "cd <repo>/hosts/linux && MIDIBOX_WAV_OUT=<repo>/captures/<タスク名>/out.wav \
-   DISPLAY=:0 timeout 30 ./build/midibox_host ../../wasm-apps/<app>/<app>.wasm \
+  "cd <repo>/hosts/linux && KYBOTOS_WAV_OUT=<repo>/captures/<タスク名>/out.wav \
+   DISPLAY=:0 timeout 30 ./build/kybotos_host ../../wasm-apps/<app>/<app>.wasm \
    > <repo>/captures/<タスク名>/out.log 2>&1" 90000
 ```
 

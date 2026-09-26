@@ -18,9 +18,9 @@ mkdir -p "$OUTDIR"
 FPS="${SCREEN_FPS:-10}"
 export DISPLAY="${DISPLAY:-:0}"
 
-# midibox_host の pid と一致するウィンドウを選ぶ(同名のフレーム窓は mutter の pid)
-WIN_NAME="${SCREEN_WINDOW_NAME:-MidiAppBox WASM host}"
-PID=$(pgrep -x midibox_host | head -1 || true)
+# kybotos_host の pid と一致するウィンドウを選ぶ(同名のフレーム窓は mutter の pid)
+WIN_NAME="${SCREEN_WINDOW_NAME:-Kybotos host}"
+PID=$(pgrep -x kybotos_host | head -1 || true)
 WIN=""
 for w in $(xdotool search --name "$WIN_NAME" 2>/dev/null || true); do
   if [ -n "$PID" ] && [ "$(xdotool getwindowpid "$w" 2>/dev/null || true)" = "$PID" ]; then
@@ -28,7 +28,7 @@ for w in $(xdotool search --name "$WIN_NAME" 2>/dev/null || true); do
   fi
 done
 if [ -z "$WIN" ]; then
-  echo "screen-rec: window '$WIN_NAME' of midibox_host not found (SDL host が起動しているか確認してください)" >&2
+  echo "screen-rec: window '$WIN_NAME' of kybotos_host not found (SDL host が起動しているか確認してください)" >&2
   exit 1
 fi
 

@@ -1,4 +1,4 @@
-# MidiAppBox ロードマップ
+# Kybotos ロードマップ
 
 **このファイルがフェーズ計画の唯一の情報源である。**
 
@@ -73,6 +73,7 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 
 | 日付 | 変更 |
 |---|---|
+| 2026-09-26 | **旧名 MidiAppBox を Kybotos に改名した**(`kybotos_host`、`KYBOTOS_*`、`CONFIG_KYBOTOS_*`、`kybotos.bin`、`KBCMD`、コンテナの `/workspaces/kybotos`。`docs/results/publish-prep.md` の追記)。記録と履歴は旧名のまま |
 | 2026-09-26 | **公開の準備**(`docs/results/publish-prep.md`): ライセンスを Apache-2.0 に、README を Kybotos として書き直し、CI をこの repo のビルドに直した(release は外した)。個人の運用の記述(連載記事の運用、出展予定)を外し、**マイルストーンの節を削除**した |
 | 2026-09-26 | **repo を分割し、Sequencer を非公開の app-sequencer へ移した**(`docs/results/repo-split.md`)。Sequencer トラックの表は**プラットフォーム側の変更だけ**に縮め(アプリ側の計画と記録は app-sequencer)、21f を done にした。**回帰は 5 本に戻した**。ファームへの埋め込みを表から回す形にし、この repo の外のアプリを `KYBOTOS_EXTRA_APPS` で載せられるようにした。Sequencer だけの課題 U-19 / U-20 / U-28 は app-sequencer へ移した。**U-29 を起票し、同日クローズ**(`src/dependencies.lock` をコミットして managed component の版を固定した。ユーザー判断)。以下の行の「(非公開)」のファイルは app-sequencer にある |
 | 2026-09-23 | **Phase 21e 完了。続けて Phase 21f の指示書を作成した**(`docs/prompts/phase21f.md`(非公開))。**21e のユーザー判断**: (a) **割り当て UI をグリッドにし、21f の予定を前倒し**(Control の小節を行に展開、右に Drum / Chord / Bass / Melo の列、マスは `+` タイルの見た目でタップしてアサイン)、(b) **rect 上限 80・実機プール 176KB を承認**、(c) **複数の拍子とまたがりを含むデモ曲**(SG04)、(d) **U-22 の原因調査と確認実験**(DMA リング 6 → 3 で予測どおり 17ms 縮む)、**対策は案 A を別フェーズ**(当初 21g としたが、**Drum だけでなく全体に関わるので Phase 22 以降**とユーザーが判断)、(e) **グリッドにも `1` / `RPT`**(`1` = Chapter。実施は 21f)、(f) **`device-regress.sh` の修正を承認**(IDE の clangd を落としていた)。**21f の指示書で決めたこと**: 21e でグリッドを前倒ししたので中心は「グリッドの上で再生しながら組み立てる」こと、**一緒に片付けるもの = spec Q7(arrangement 側のトグル)、グリッドの語彙の規約化、ループ境界の PC を SL MK3 で確認**。U-22 の行を更新 |
@@ -115,7 +116,7 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 | U-8 | **SDMMC ネイティブモードと PSRAM の共存。** 同じピンを SDMMC → SPI3 と再初期化する 2 段遷移が PSRAM 有効時に不安定。main は SDSPI 固定で運用中 | `phase15.md` ステップ 4 | SD から高速転送が必要になったときだけ |
 | U-9 | **エクスプレッションペダル**(ADS1115 経由の `hostapi_analog_read`) | 旧ロードマップ「割り込み候補」 | Sequencer 完了後 |
 | U-10 | **ブラウザを第 3 ホストにする**(TypeScript で Host API を実装)。移植点は `shared/seq_core.c` のフック 7 個 | 旧ロードマップ「割り込み候補」、`phase11.md` | Phase 20 以降。Sequencer が最初の移植対象になる |
-| U-11 | **Linux ホストの回帰を `timeout N ./build/midibox_host <wasm>` 方式にする。** SIGTERM が `SDL_QUIT` に変換され、xdotool なしで `app stopped` まで完走する | `docs/lessons.md`(14) | workflow §1 の変更にあたるため**ユーザー承認が要る**。急がない |
+| U-11 | **Linux ホストの回帰を `timeout N ./build/kybotos_host <wasm>` 方式にする。** SIGTERM が `SDL_QUIT` に変換され、xdotool なしで `app stopped` まで完走する | `docs/lessons.md`(14) | workflow §1 の変更にあたるため**ユーザー承認が要る**。急がない |
 | ~~U-12~~ | **✅ クローズ(2026-09-20、Phase 18 で解決)。** ~~Linux ホストの画面キャプチャの自動化~~。x11grab が黒くなるのは画面全体を読むためで、**ウィンドウ ID を指定する `import -window` / `xwd -id` なら取れる**。`scripts/screen-still.sh` / `screen-rec.sh` を切り替え済み(手順は `docs/workflow.md` §3.6) | `check-workflow.md` / `phase18.md`(非公開) | — |
 | U-13 | **120bpm 以外での系統誤差の確認、Song Position Pointer の送出** | `phase09c.md`(持ち越し)、`hostapi.md` §3 | Song の途中から再生する機能を作るとき(SPP) |
 | U-14 | **MIDI IN の受信ダンプ機能は `feature/midi-in-rx-dump` ブランチにしか無い**(main 未マージ) | `phase08c.md` | 必要になったとき |

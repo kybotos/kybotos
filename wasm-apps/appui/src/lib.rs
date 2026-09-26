@@ -1,4 +1,4 @@
-// MidiAppBox の共通 UI 部品(Phase 18a)。Host API に依存しない。
+// Kybotos の共通 UI 部品(Phase 18a)。Host API に依存しない。
 //
 // - 操作規約: docs/design/ui-conventions.md
 // - 記録: docs/results/phase16-21-platform.md §4(Phase 18a)

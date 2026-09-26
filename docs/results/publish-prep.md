@@ -22,3 +22,33 @@
 | 依存(repo には入らない) | LVGL: MIT、esp_lvgl_port / esp_lcd_touch / esp-audio-player: Apache-2.0、WAMR: Apache-2.0 WITH LLVM-exception、Helix MP3: RPSL |
 | ビルド用のイメージ | 匿名で取得できる |
 | 新しい clone でのビルド | CI と同じコマンドで、ファームウェアと Linux ホストのビルドが通る(下の記録) |
+
+## 追記 (2026-09-26): 旧名 MidiAppBox を Kybotos に改名した
+
+公開の後に変えると、外の人が使い始めた名前(実行ファイル名、環境変数)を途中で変えることになるので、公開の前にまとめて改名した。
+**互換のための別名は置いていない。** `docs/prompts/` / `docs/results/` の当時の記録と git の履歴は旧名のまま。
+
+| 旧 | 新 |
+|---|---|
+| コンテナのマウント先 `/workspaces/MidiAppBox` | `/workspaces/kybotos`(README、workflow、回帰スクリプト、CI、`.lsp-docker.yml`) |
+| `midibox_host` / CMake の project `midibox_linux_host` | `kybotos_host` / `kybotos_linux_host` |
+| ウィンドウ名 `MidiAppBox WASM host` | `Kybotos host` |
+| ALSA のクライアント名 `MidiAppBox` | `Kybotos` |
+| 環境変数 `MIDIBOX_WAV_OUT` / `MIDIBOX_MIDI_PORT` / `MIDIBOX_FONT` / `MIDIBOX_PORT` | `KYBOTOS_*` |
+| Kconfig `menu "MidiAppBox"` / `CONFIG_MIDIBOX_*`(6 種) | `menu "Kybotos"` / `CONFIG_KYBOTOS_*` |
+| ESP-IDF の `PROJECT_NAME` `midi_app_box` | `kybotos`(`kybotos.bin`) |
+| シリアルコンソールのログのタグ `MBCMD` | `KBCMD` |
+| 文書・コメントの見出し | Kybotos |
+
+- 永続データ(SD のパス)に旧名は無いので、保存済みのデータとの互換は変わらない。
+- ビルドディレクトリ(`src/build`、`hosts/linux/build`)と `src/sdkconfig` は旧パス・旧名を覚えているので作り直した
+  (`sdkconfig.defaults` に該当の項目は無く、設定値は既定のまま)。手元に古いビルドがある場合も消して作り直すこと。
+
+| 確認 | 結果 |
+|---|---|
+| ESP32-S3 のビルド(ビルドディレクトリを消してから) | OK。`kybotos.bin`、`sdkconfig` に `CONFIG_KYBOTOS_*` |
+| Linux ホストのビルドと単体テスト | OK(`kybotos_host`) |
+| Linux の回帰 5 本(ウィンドウ名で探す) | ALL PASS、highmark は改名前と同じ |
+| 実機の回帰 5 本(`KBCMD`) | ALL PASS、停止時 `free_int` 150,312 / `largest_int` 102,400 / `free_psram` 8,136,668(改名前と同じ) |
+| 外のアプリを載せた回帰 6 本(実機・Linux)、実機のプール | ALL PASS、値は改名前と同じ |
+| サンプルアプリの `.wasm` | 変わらない |

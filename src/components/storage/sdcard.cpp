@@ -30,11 +30,11 @@ bool SdCard::mount(const char* mount_point) {
     esp_err_t err = ESP_FAIL;
 
     // Try SDMMC host first if SDMMC pins are defined。
-    // CONFIG_MIDIBOX_SD_SKIP_SDMMC_PROBE を立てるとこのブロックを飛ばして SDSPI へ
+    // CONFIG_KYBOTOS_SD_SKIP_SDMMC_PROBE を立てるとこのブロックを飛ばして SDSPI へ
     // 直行する。PSRAM 有効時はこのプローブから戻らず TG1WDT リブートループになる
     // (Phase 12 E5)ため、PSRAM 構成では既定で立つ。理由と代償は Kconfig の help、
     // 切り分けは Phase 15 ステップ 4(docs/results/phase15.md)。
-#if defined(PIN_SDMMC_CLK) && !CONFIG_MIDIBOX_SD_SKIP_SDMMC_PROBE
+#if defined(PIN_SDMMC_CLK) && !CONFIG_KYBOTOS_SD_SKIP_SDMMC_PROBE
     do {
         ESP_LOGI(TAG_SD, "Trying SDMMC host: CLK=%d CMD=%d D0=%d",
                  (int)PIN_SDMMC_CLK, (int)PIN_SDMMC_CMD, (int)PIN_SDMMC_D0);
@@ -95,7 +95,7 @@ bool SdCard::mount(const char* mount_point) {
         }
         ESP_LOGW(TAG_SD, "SDMMC mount failed: %d, falling back to SDSPI", (int)err);
     } while (0);
-#endif // PIN_SDMMC_CLK && !CONFIG_MIDIBOX_SD_SKIP_SDMMC_PROBE
+#endif // PIN_SDMMC_CLK && !CONFIG_KYBOTOS_SD_SKIP_SDMMC_PROBE
 
     // Fallback to SDSPI host
     spi_bus_config_t bus_cfg{};

@@ -29,7 +29,7 @@ bool launcher_launch_by_name(const char* name, const char** err, char* path_out,
 void launcher_on_app_stopped(const char* error);
 
 // 5C 検証用: mp3player.wasm の起動→停止を 10 サイクル回して free heap をログし、
-// 壊れた .wasm のロードエラー処理も確認する(CONFIG_MIDIBOX_WASM_CYCLE_TEST)。
+// 壊れた .wasm のロードエラー処理も確認する(CONFIG_KYBOTOS_WASM_CYCLE_TEST)。
 // launcher_prepare_sd 成功後、十分なスタックのタスクから呼ぶこと。
 void launcher_run_cycle_test();
 

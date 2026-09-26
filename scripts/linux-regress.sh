@@ -25,20 +25,20 @@ fail=0
 for app in $APPS; do
   # ホストはこのスクリプトの子として起動する(ペインへ send すると、このスクリプトを走らせているペインに割り込む)
   wasm=${APP_WASM[$app]:-$REPO/wasm-apps/$app/$app.wasm}
-  (cd "$REPO/hosts/linux" && ./build/midibox_host "$wasm" > "$OUT/$app.log" 2>&1 &)
-  for _ in $(seq 1 60); do pgrep -x midibox_host >/dev/null && break; sleep 0.25; done
+  (cd "$REPO/hosts/linux" && ./build/kybotos_host "$wasm" > "$OUT/$app.log" 2>&1 &)
+  for _ in $(seq 1 60); do pgrep -x kybotos_host >/dev/null && break; sleep 0.25; done
   sleep 5
-  pid=$(pgrep -x midibox_host | head -1); WIN=""
-  for w in $(xdotool search --name "MidiAppBox WASM host"); do
+  pid=$(pgrep -x kybotos_host | head -1); WIN=""
+  for w in $(xdotool search --name "Kybotos host"); do
     [ "$(xdotool getwindowpid "$w" 2>/dev/null)" = "$pid" ] && WIN=$w
   done
   [ -n "$WIN" ] && xdotool key --window "$WIN" Escape
-  for _ in $(seq 1 60); do pgrep -x midibox_host >/dev/null || break; sleep 0.25; done
+  for _ in $(seq 1 60); do pgrep -x kybotos_host >/dev/null || break; sleep 0.25; done
   L=$OUT/$app.log
   s=$(grep -c 'app started' "$L"); t=$(grep -c 'app stopped' "$L"); w=$(grep -cE 'no free slot|WARN|ERROR' "$L")
   hm=$(grep -o 'highmark=[0-9]*' "$L" | tail -1)
   if [ "$s" -ge 1 ] && [ "$t" -ge 1 ] && [ "$w" -eq 0 ]; then r=PASS; else r=FAIL; fail=1; fi
   echo "$app started=$s stopped=$t warn=$w $hm $r"
 done
-if pgrep -x midibox_host >/dev/null; then echo "leftover midibox_host"; fail=1; fi
+if pgrep -x kybotos_host >/dev/null; then echo "leftover kybotos_host"; fail=1; fi
 exit $fail

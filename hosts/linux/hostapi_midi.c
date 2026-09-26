@@ -11,7 +11,7 @@
  *
  * 実機との違い: 実機はハードウェア UART。Linux ホストは実 MIDI ポートを
  * 持たないため、ALSA シーケンサ(libasound, 任意依存)で実際のポート
- * (既定では名前に "UM-ONE" を含むクライアント。MIDIBOX_MIDI_PORT で上書き
+ * (既定では名前に "UM-ONE" を含むクライアント。KYBOTOS_MIDI_PORT で上書き
  * 可能)へ接続して送受信する。ALSA が使えない/見つからない環境では、送信は
  * バイト列を stderr にログ出力するだけ、受信は常に 0 件を返すフォールバック
  * で動作を継続する。
@@ -88,11 +88,11 @@ static snd_midi_event_t* s_decode_codec;
 static SDL_Thread* s_rx_thread;
 static volatile bool s_rx_thread_stop;
 
-/* 名前に MIDIBOX_MIDI_PORT(既定 "UM-ONE")を含む、書き込み可能なポートを
+/* 名前に KYBOTOS_MIDI_PORT(既定 "UM-ONE")を含む、書き込み可能なポートを
  * 探して接続する(見つからなければログを出して未接続のまま継続)。 */
 static void try_connect_destination(void)
 {
-    const char* want = getenv("MIDIBOX_MIDI_PORT");
+    const char* want = getenv("KYBOTOS_MIDI_PORT");
     if (!want || !want[0]) want = "UM-ONE";
 
     snd_seq_client_info_t* cinfo;
@@ -128,15 +128,15 @@ static void try_connect_destination(void)
     }
     fprintf(stderr,
             "midi: no destination matching \"%s\" found (aconnect -l to check; "
-            "set MIDIBOX_MIDI_PORT to override). Sending unconnected.\n", want);
+            "set KYBOTOS_MIDI_PORT to override). Sending unconnected.\n", want);
 }
 
-/* 名前に MIDIBOX_MIDI_PORT(既定 "UM-ONE")を含む、読み出し可能なポートを
+/* 名前に KYBOTOS_MIDI_PORT(既定 "UM-ONE")を含む、読み出し可能なポートを
  * 探して自ポート(MIDI IN)へ接続する(見つからなければログを出して未接続
  * のまま継続。受信は常に 0 件になる)。 */
 static void try_connect_source(void)
 {
-    const char* want = getenv("MIDIBOX_MIDI_PORT");
+    const char* want = getenv("KYBOTOS_MIDI_PORT");
     if (!want || !want[0]) want = "UM-ONE";
 
     snd_seq_client_info_t* cinfo;
@@ -172,7 +172,7 @@ static void try_connect_source(void)
     }
     fprintf(stderr,
             "midi: no MIDI IN source matching \"%s\" found (aconnect -l to check; "
-            "set MIDIBOX_MIDI_PORT to override). hostapi_midi_recv will return 0 records.\n",
+            "set KYBOTOS_MIDI_PORT to override). hostapi_midi_recv will return 0 records.\n",
             want);
 }
 
@@ -256,7 +256,7 @@ bool host_midi_init(void)
         fprintf(stderr, "midi: snd_seq_open failed (falling back to log-only)\n");
         s_seq = NULL;
     } else {
-        snd_seq_set_client_name(s_seq, "MidiAppBox");
+        snd_seq_set_client_name(s_seq, "Kybotos");
         s_port = snd_seq_create_simple_port(s_seq, "MIDI OUT",
             SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
             SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);

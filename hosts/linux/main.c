@@ -1,5 +1,5 @@
 /*
- * MidiAppBox WASM PoC — Linux ホスト(ランチャー付き)。
+ * Kybotos WASM PoC — Linux ホスト(ランチャー付き)。
  *
  * 実機と同じ構成: WAMR (fast interpreter, Alloc_With_Pool 64KB) を常駐させ、
  * 共通のホスト API 定義 (shared/hostapi_defs.h) で .wasm を実行する。
@@ -7,9 +7,9 @@
  * (export されていれば) app_exit → exec_env → instance → module の順に破棄。
  *
  * 使い方:
- *   midibox_host                 ... ../../wasm-apps をスキャンしてメニュー表示
- *   midibox_host <dir>           ... 指定ディレクトリをスキャンしてメニュー表示
- *   midibox_host <file.wasm>     ... 単発実行(メニューなし。CI スモーク用)
+ *   kybotos_host                 ... ../../wasm-apps をスキャンしてメニュー表示
+ *   kybotos_host <dir>           ... 指定ディレクトリをスキャンしてメニュー表示
+ *   kybotos_host <file.wasm>     ... 単発実行(メニューなし。CI スモーク用)
  *
  * 操作: マウスクリックで起動 / ESC でメニューに戻る(実機の power_key 短押し相当)
  *       メニューで ESC またはウィンドウクローズで終了

@@ -4,7 +4,7 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_MIDIBOX_SCREENSAVER
+#if CONFIG_KYBOTOS_SCREENSAVER
 
 #include "display.hpp"
 
@@ -19,8 +19,8 @@ static const char* TAG = "WASM/SAVER";
 
 namespace {
 
-constexpr uint32_t kSaverMs = (uint32_t)CONFIG_MIDIBOX_SCREENSAVER_SEC * 1000u;
-constexpr uint32_t kBlankMs = (uint32_t)CONFIG_MIDIBOX_BACKLIGHT_OFF_SEC * 1000u;
+constexpr uint32_t kSaverMs = (uint32_t)CONFIG_KYBOTOS_SCREENSAVER_SEC * 1000u;
+constexpr uint32_t kBlankMs = (uint32_t)CONFIG_KYBOTOS_BACKLIGHT_OFF_SEC * 1000u;
 constexpr uint32_t kTickMs  = 200;   // 復帰要求の取りこぼしを防ぐ程度に短く
 constexpr int32_t  kDotSize = 14;
 
@@ -186,7 +186,7 @@ void screensaver_request_wake() { s_wake_req.store(true); }
 
 } // namespace wasmrt
 
-#else  // !CONFIG_MIDIBOX_SCREENSAVER
+#else  // !CONFIG_KYBOTOS_SCREENSAVER
 
 namespace wasmrt {
 void screensaver_attach(lv_obj_t*) {}

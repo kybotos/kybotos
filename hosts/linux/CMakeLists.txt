@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(midibox_linux_host C)
+project(kybotos_linux_host C)
 
 set(CMAKE_C_STANDARD 11)
 if(NOT CMAKE_BUILD_TYPE)
@@ -69,14 +69,14 @@ if(NOT ALSA_FOUND)
 endif()
 
 # ---- host executable ----
-add_executable(midibox_host main.c hostapi_sdl.c hostapi_midi.c hostapi_seq.c
+add_executable(kybotos_host main.c hostapi_sdl.c hostapi_midi.c hostapi_seq.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/seq_core.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c)
-target_include_directories(midibox_host PRIVATE
+target_include_directories(kybotos_host PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
 )
-target_link_libraries(midibox_host PRIVATE vmlib SDL2::SDL2)
+target_link_libraries(kybotos_host PRIVATE vmlib SDL2::SDL2)
 
 # ---- shared/seq_core.c の単体テスト(Phase 17)----
 # 偽の時計でディスパッチを決定的に進める。SDL / WAMR / ALSA には依存しない。
@@ -88,40 +88,40 @@ target_include_directories(seq_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../
 add_test(NAME seq_core_test COMMAND seq_core_test)
 
 if(ALSA_FOUND)
-    target_compile_definitions(midibox_host PRIVATE HAVE_ALSA)
-    target_include_directories(midibox_host PRIVATE ${ALSA_INCLUDE_DIRS})
-    target_link_libraries(midibox_host PRIVATE ${ALSA_LIBRARIES})
+    target_compile_definitions(kybotos_host PRIVATE HAVE_ALSA)
+    target_include_directories(kybotos_host PRIVATE ${ALSA_INCLUDE_DIRS})
+    target_link_libraries(kybotos_host PRIVATE ${ALSA_LIBRARIES})
     message(STATUS "ALSA: found (MIDI OUT sent via ALSA sequencer)")
 elseif(ALSA_PC_FOUND)
-    target_compile_definitions(midibox_host PRIVATE HAVE_ALSA)
-    target_include_directories(midibox_host PRIVATE ${ALSA_PC_INCLUDE_DIRS})
-    target_link_libraries(midibox_host PRIVATE ${ALSA_PC_LIBRARIES})
+    target_compile_definitions(kybotos_host PRIVATE HAVE_ALSA)
+    target_include_directories(kybotos_host PRIVATE ${ALSA_PC_INCLUDE_DIRS})
+    target_link_libraries(kybotos_host PRIVATE ${ALSA_PC_LIBRARIES})
     message(STATUS "ALSA: found via pkg-config (MIDI OUT sent via ALSA sequencer)")
 else()
     message(STATUS "ALSA: not found (hostapi_midi_send will log to stderr only)")
 endif()
 
 if(SDL2_ttf_FOUND)
-    target_compile_definitions(midibox_host PRIVATE HAVE_SDL_TTF)
-    target_link_libraries(midibox_host PRIVATE SDL2_ttf::SDL2_ttf)
+    target_compile_definitions(kybotos_host PRIVATE HAVE_SDL_TTF)
+    target_link_libraries(kybotos_host PRIVATE SDL2_ttf::SDL2_ttf)
     message(STATUS "SDL2_ttf: found (antialiased text enabled)")
 elseif(SDL2_TTF_PC_FOUND)
-    target_compile_definitions(midibox_host PRIVATE HAVE_SDL_TTF)
-    target_include_directories(midibox_host PRIVATE ${SDL2_TTF_PC_INCLUDE_DIRS})
-    target_link_libraries(midibox_host PRIVATE ${SDL2_TTF_PC_LIBRARIES})
+    target_compile_definitions(kybotos_host PRIVATE HAVE_SDL_TTF)
+    target_include_directories(kybotos_host PRIVATE ${SDL2_TTF_PC_INCLUDE_DIRS})
+    target_link_libraries(kybotos_host PRIVATE ${SDL2_TTF_PC_LIBRARIES})
     message(STATUS "SDL2_ttf: found via pkg-config (antialiased text enabled)")
 else()
     message(STATUS "SDL2_ttf: not found (falling back to font8x8)")
 endif()
 
 if(SDL2_mixer_FOUND)
-    target_compile_definitions(midibox_host PRIVATE HAVE_SDL_MIXER)
-    target_link_libraries(midibox_host PRIVATE SDL2_mixer::SDL2_mixer)
+    target_compile_definitions(kybotos_host PRIVATE HAVE_SDL_MIXER)
+    target_link_libraries(kybotos_host PRIVATE SDL2_mixer::SDL2_mixer)
     message(STATUS "SDL2_mixer: found (MP3 playback enabled)")
 elseif(SDL2_MIXER_PC_FOUND)
-    target_compile_definitions(midibox_host PRIVATE HAVE_SDL_MIXER)
-    target_include_directories(midibox_host PRIVATE ${SDL2_MIXER_PC_INCLUDE_DIRS})
-    target_link_libraries(midibox_host PRIVATE ${SDL2_MIXER_PC_LIBRARIES})
+    target_compile_definitions(kybotos_host PRIVATE HAVE_SDL_MIXER)
+    target_include_directories(kybotos_host PRIVATE ${SDL2_MIXER_PC_INCLUDE_DIRS})
+    target_link_libraries(kybotos_host PRIVATE ${SDL2_MIXER_PC_LIBRARIES})
     message(STATUS "SDL2_mixer: found via pkg-config (MP3 playback enabled)")
 else()
     message(STATUS "SDL2_mixer: not found (hostapi_audio_play will fail)")

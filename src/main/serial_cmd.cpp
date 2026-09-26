@@ -24,7 +24,7 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_MIDIBOX_SERIAL_CMD
+#if CONFIG_KYBOTOS_SERIAL_CMD
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -43,7 +43,7 @@
 namespace {
 
 // 応答行のタグ。回帰スクリプトはこのタグで行を拾う。
-const char* TAG = "MBCMD";
+const char* TAG = "KBCMD";
 
 constexpr int kStackWords = 3072;
 constexpr size_t kLineMax = 96;
@@ -175,7 +175,7 @@ void Init()
 
 } // namespace serialcmd
 
-#else // !CONFIG_MIDIBOX_SERIAL_CMD
+#else // !CONFIG_KYBOTOS_SERIAL_CMD
 
 namespace serialcmd {
 void Init() {}

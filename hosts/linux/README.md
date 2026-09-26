@@ -6,7 +6,7 @@ libc builtin のみ)を FetchContent で取得してビルドする。
 
 依存: cmake (>=3.16), gcc, libsdl2-dev
 任意: libsdl2-ttf-dev(あればシステムフォントでアンチエイリアス描画。
-無ければ font8x8 ビットマップにフォールバック。`MIDIBOX_FONT` 環境変数で
+無ければ font8x8 ビットマップにフォールバック。`KYBOTOS_FONT` 環境変数で
 フォントファイルを指定可能)
 
 ```
@@ -15,11 +15,11 @@ cmake -B build
 cmake --build build -j
 
 # ランチャーモード(既定: ../../wasm-apps をスキャン。サブディレクトリ 1 段も検索)
-./build/midibox_host
-./build/midibox_host <appsディレクトリ>
+./build/kybotos_host
+./build/kybotos_host <appsディレクトリ>
 
 # 単発実行モード(メニューなし。CI スモーク用)
-./build/midibox_host ../../wasm-apps/touch_demo/touch_demo.wasm
+./build/kybotos_host ../../wasm-apps/touch_demo/touch_demo.wasm
 ```
 
 - 描画: SDL2 ウィンドウ(実機と同じランドスケープ 320x240 の 2 倍拡大)

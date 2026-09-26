@@ -203,7 +203,7 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
   (Phase 16 の教訓だが、`synth_probe` で踏み直した)(16 / 21)。
 - **室内マイクの録音では 10ms 級の事象を判定できない。** 25ms ビンで 1 ビン以下、
   5ms へ落としても MP3 のフェードインに埋もれる。**Linux ホストの WAV 書き出し
-  (`MIDIBOX_WAV_OUT`)で機械判定し、実機は耳で確かめる**のが現実的(21)。
+  (`KYBOTOS_WAV_OUT`)で機械判定し、実機は耳で確かめる**のが現実的(21)。
 
 ## ドラムマシンと画面(Phase 21a)
 
@@ -552,8 +552,8 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
 - **SDL ホストを常駐させているペインに `hpane.sh run` を投げない。** 前面プロセスが居るので
   コマンドが待たされ、「ビルドしたはずの `.wasm` が置き換わっていない」状態で検証してしまう(18c)。
 - **`midi-clock-probe` はホストの ALSA ポートが現れてから起動する。** `app started` の直後に起動すると
-  `no readable port matching "MidiAppBox"` で空振りする(3 回踏んだ)。
-  `until aconnect -l | grep -q MidiAppBox; do sleep 0.5; done` を挟む(18c)。
+  `no readable port matching "Kybotos"` で空振りする(3 回踏んだ)。
+  `until aconnect -l | grep -q Kybotos; do sleep 0.5; done` を挟む(18c)。
 
 ## 作業手順(一時コードの撤去)
 
@@ -605,19 +605,19 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
   **マウスクリックの配信は不安定**(`getmouselocation` で狙った座標に一致していても、
   意図しない行に届く/どこにも届かないことがある。`windowactivate` や `sleep` を
   挟んでも解消せず)。ボタン/メニュークリックに依存する自動 UI 操作は現状信頼できない。
-  ランチャー経由が必要なければ単発実行モード(`./build/midibox_host <app>.wasm`
+  ランチャー経由が必要なければ単発実行モード(`./build/kybotos_host <app>.wasm`
   で直接起動)を使うとメニュークリック自体を回避できる(check-workflow)。
   **【Phase 18 の観察】** 単発実行モードの sequencer に対し、pid で選んだウィンドウへ
   `mousemove --window <id> x y` → `click --window <id> 1`(座標は論理座標の 2 倍)を送ったところ、
   **一覧 → Session 画面 → スクロール → PLAY → BACK の全クリックが意図どおり届いた**ことを
   キャプチャで確認した。当時の不安定さの原因は未特定だが、**キャプチャで届き先を確かめながら**なら
   画面遷移の確認に使える。`docs/workflow.md` §1-8 の「使わない」の見直しは承認を得てから(18)。
-- `xdotool search --name "MidiAppBox WASM host"` は複数のウィンドウ ID を返す
+- `xdotool search --name "Kybotos host"` は複数のウィンドウ ID を返す
   ことがあり、うち `mutter-x11-frames` の装飾ウィンドウが無関係に混入する
-  ケースを確認。`xdotool getwindowpid <id>` と `pgrep -af midibox_host` の
+  ケースを確認。`xdotool getwindowpid <id>` と `pgrep -af kybotos_host` の
   pid を突き合わせて対象ウィンドウを特定してから `key`/`Escape` を送ること
   (check-workflow-routine)。
-- herdr の pane に `send-keys` で "Escape" を送っても `midibox_host`
+- herdr の pane に `send-keys` で "Escape" を送っても `kybotos_host`
   (SDL アプリ)は終了しない(ターミナルではなく SDL ウィンドウがフォーカスを
   持つため、キー入力はそちらに届く)。プロセスを止めるには
   `herdr pane send-keys <pane_id> "C-c"` でそのペインの前面プロセスへ
@@ -675,7 +675,7 @@ herdr 運用・ビルド手順そのものの教訓は `docs/workflow.md` に一
   見かけ上「勝手に別アプリが起動する」ように見える。** ループの各ステップで
   「ESC を送った → 実際に `app stopped` が出た」ことを確認してから次へ進むこと
   (`pgrep` で残留有無を都度確認するのが安全)(14)。
-- **副次的な発見**: `timeout N ./build/midibox_host <wasm>` で SIGTERM を送ると、
+- **副次的な発見**: `timeout N ./build/kybotos_host <wasm>` で SIGTERM を送ると、
   SDL が `SDL_QUIT` イベントに変換するため `xdotool` の ESC 送信なしでも
   `app stopped` まで正常に完走する(5 アプリで確認)。ウィンドウ ID の解決が
   絡む `xdotool` 経由より単純だが、**§1 の不変条件(実行形式の無断変更禁止)に

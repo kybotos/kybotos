@@ -338,7 +338,7 @@ static void click_record_fire(uint64_t sample)
 }
 
 /* ---- 検証用の WAV 書き出し (Phase 21) ----
- * 環境変数 MIDIBOX_WAV_OUT が設定されているときだけ、ミキサの出力を追記する。
+ * 環境変数 KYBOTOS_WAV_OUT が設定されているときだけ、ミキサの出力を追記する。
  * 既定 off なので既存の挙動は変わらない。4 音同時・ピーク・オンセット間隔を
  * 耳ではなく数値で確かめるための口(docs/results/phase21.md 0-g)。 */
 static FILE* s_wav;
@@ -349,10 +349,10 @@ static void wav_put16(FILE* f, uint16_t v) { fputc(v & 0xff, f); fputc((v >> 8) 
 
 static void wav_open(void)
 {
-    const char* path = getenv("MIDIBOX_WAV_OUT");
+    const char* path = getenv("KYBOTOS_WAV_OUT");
     if (!path || !*path) return;
     s_wav = fopen(path, "wb");
-    if (!s_wav) { fprintf(stderr, "MIDIBOX_WAV_OUT: cannot open %s\n", path); return; }
+    if (!s_wav) { fprintf(stderr, "KYBOTOS_WAV_OUT: cannot open %s\n", path); return; }
     /* ヘッダは閉じるときに書き直す */
     fwrite("RIFF????WAVEfmt ", 1, 16, s_wav);
     wav_put32(s_wav, 16);
@@ -438,7 +438,7 @@ static TTF_Font* s_font;
 static void try_open_font(void)
 {
     const char* candidates[] = {
-        getenv("MIDIBOX_FONT"), /* 環境変数で差し替え可 */
+        getenv("KYBOTOS_FONT"), /* 環境変数で差し替え可 */
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     };
@@ -924,7 +924,7 @@ bool host_sdl_init(void)
     /* ALLOW_HIGHDPI: ディスプレイスケール環境(ChromeOS 等)でウィンドウサイズと
      * マウスイベントの単位(ポイント)を一致させる。無いとイベントだけ 1/scale に
      * なりヒットテストがずれる */
-    s_window = SDL_CreateWindow("MidiAppBox WASM host",
+    s_window = SDL_CreateWindow("Kybotos host",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                 SCREEN_W * WINDOW_SCALE, SCREEN_H * WINDOW_SCALE,
                                 SDL_WINDOW_ALLOW_HIGHDPI);

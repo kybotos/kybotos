@@ -2,7 +2,7 @@
 
 ESP32-S3-Touch-LCD-2.8 (Waveshare) ベースの音楽デバイスファームウェアと、同じ `.wasm` を動かす Linux ホスト。
 「サンドボックス化された WASM アプリを組込みデバイスに配信する音楽プラットフォーム」の
-成立性検証 PoC を進行中(旧名 MidiAppBox。コード中の識別子やパスには旧名が残っている)。
+成立性検証 PoC を進行中(旧名 MidiAppBox。2026-09-26 に改名した。当時の記録 `docs/prompts` / `docs/results` と git の履歴には旧名(`midibox_host`、`MIDIBOX_*`、`MBCMD`、`/workspaces/MidiAppBox` など)が残る)。
 
 ## ドキュメント構成(必読)
 

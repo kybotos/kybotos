@@ -14,7 +14,7 @@ jobs:
       # README と同じイメージ。コンテナの entrypoint が作業ディレクトリの所有者に合わせて降格する
       - name: idf.py build
         run: |
-          docker run --rm -v "$PWD:/workspaces/MidiAppBox" -w /workspaces/MidiAppBox/src \
+          docker run --rm -v "$PWD:/workspaces/kybotos" -w /workspaces/kybotos/src \
             ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
             bash -c 'source /opt/esp-idf/export.sh && idf.py build'
       - name: dependencies.lock is unchanged

@@ -30,12 +30,12 @@ with MIDI in/out wired to a UART.
 The build runs in a container image with ESP-IDF.
 
 ```
-docker run --rm -v ${PWD}:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/src \
+docker run --rm -v ${PWD}:/workspaces/kybotos -w /workspaces/kybotos/src \
   ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
   bash -c 'source /opt/esp-idf/export.sh && idf.py build'
 
 DEV=/dev/ttyACM0
-docker run --rm -it -v ${PWD}:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/src \
+docker run --rm -it -v ${PWD}:/workspaces/kybotos -w /workspaces/kybotos/src \
   --device=${DEV} --group-add $(stat -c '%g' ${DEV}) \
   ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
   bash -c "source /opt/esp-idf/export.sh && idf.py -p ${DEV} flash"
@@ -51,8 +51,8 @@ docker run --rm -it -v ${PWD}:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/s
 sudo apt install cmake gcc libsdl2-dev libsdl2-ttf-dev libsdl2-mixer-dev libasound2-dev
 cd hosts/linux
 cmake -B build && cmake --build build -j
-./build/midibox_host                                           # launcher (scans ../../wasm-apps)
-./build/midibox_host ../../wasm-apps/metronome/metronome.wasm  # run a single app
+./build/kybotos_host                                           # launcher (scans ../../wasm-apps)
+./build/kybotos_host ../../wasm-apps/metronome/metronome.wasm  # run a single app
 ```
 
 See `hosts/linux/README.md` for details.

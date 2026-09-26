@@ -1,4 +1,4 @@
-// MidiAppBox: WASM アプリランチャー (Phase 6D で一本化)。
+// Kybotos: WASM アプリランチャー (Phase 6D で一本化)。
 // 旧 MP3 デモモード(Kconfig 分岐)は Phase 6D で削除した。同等機能は
 // WASM アプリ側の mp3player.wasm が提供する。
 #include "freertos/FreeRTOS.h"
@@ -103,7 +103,7 @@ extern "C" void app_main()
         if (!wasmrt::launcher_prepare_sd(status, sizeof(status))) {
             ESP_LOGE(TAG, "SD prepare failed: %s", status);
         }
-#if CONFIG_MIDIBOX_WASM_CYCLE_TEST
+#if CONFIG_KYBOTOS_WASM_CYCLE_TEST
         else {
             wasmrt::launcher_run_cycle_test();
         }

@@ -7,8 +7,8 @@
 # カメラ+人間操作はそのまま残す)。
 #
 # 前提:
-#   - ファームウェアが CONFIG_MIDIBOX_SERIAL_CMD=y でビルド・フラッシュ済み
-#     (シリアルコマンド ping / ls / run / stop / heap。応答はタグ MBCMD のログ行)
+#   - ファームウェアが CONFIG_KYBOTOS_SERIAL_CMD=y でビルド・フラッシュ済み
+#     (シリアルコマンド ping / ls / run / stop / heap。応答はタグ KBCMD のログ行)
 #   - herdr が動いていて scripts/hpane.sh が使えること
 #
 # 待ち方について(docs/workflow.md §1-2 の趣旨):
@@ -33,7 +33,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HPANE="$REPO/scripts/hpane.sh"
 CONF="$REPO/scripts/device-regress.conf"
 IMAGE="ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5"
-PORT="${MIDIBOX_PORT:-/dev/ttyACM0}"
+PORT="${KYBOTOS_PORT:-/dev/ttyACM0}"
 
 TASK="device-regress"
 APPS_OVERRIDE=""
@@ -66,7 +66,7 @@ LOG="$OUT/monitor.log"
 REPORT="$OUT/report.md"
 mkdir -p "$OUT"
 
-DOCKER_RUN="docker run --rm -it -v $REPO:/workspaces/MidiAppBox$EXTRA_MOUNTS -w /workspaces/MidiAppBox/src --device=$PORT --group-add $(stat -c '%g' "$PORT") $IMAGE"
+DOCKER_RUN="docker run --rm -it -v $REPO:/workspaces/kybotos$EXTRA_MOUNTS -w /workspaces/kybotos/src --device=$PORT --group-add $(stat -c '%g' "$PORT") $IMAGE"
 
 say() { printf '%s\n' "$*" >&2; }
 
@@ -130,20 +130,20 @@ rm -f "$LOG"
 
 say "starting monitor (log: $LOG)"
 "$HPANE" send esp32-monitor \
-    "$DOCKER_RUN bash -c 'source /opt/esp-idf/export.sh && PYTHONUNBUFFERED=1 idf.py $IDF_BUILD_ARG -p $PORT monitor | tee /workspaces/MidiAppBox/captures/$TASK/monitor.log'" \
+    "$DOCKER_RUN bash -c 'source /opt/esp-idf/export.sh && PYTHONUNBUFFERED=1 idf.py $IDF_BUILD_ARG -p $PORT monitor | tee /workspaces/kybotos/captures/$TASK/monitor.log'" \
     >/dev/null 2>&1
 
 # モニタ起動はボードをリセットするので、新しい起動の完了を待つ
-if ! wait_line 'MBCMD: ready' 0 90 >/dev/null; then
+if ! wait_line 'KBCMD: ready' 0 90 >/dev/null; then
     say "ERROR: serial command console did not come up within 90s."
-    say "       CONFIG_MIDIBOX_SERIAL_CMD=y でビルド・フラッシュされているか確認すること。"
+    say "       CONFIG_KYBOTOS_SERIAL_CMD=y でビルド・フラッシュされているか確認すること。"
     say "       last lines of $LOG:"; tail -5 "$LOG" >&2
     exit 1
 fi
 
 # 疎通確認
 mark=$(line_count); send_cmd "ping"
-if ! wait_line 'MBCMD: pong' "$mark" 10 >/dev/null; then
+if ! wait_line 'KBCMD: pong' "$mark" 10 >/dev/null; then
     say "ERROR: no response to ping."; exit 1
 fi
 say "console ready"
@@ -166,11 +166,11 @@ for app in $APPS; do
 
     mark=$(line_count)
     send_cmd "run $app"
-    if ! runline=$(wait_line 'MBCMD: run (ok|err)' "$mark" 20); then
+    if ! runline=$(wait_line 'KBCMD: run (ok|err)' "$mark" 20); then
         ROWS+=("| $label | - | - | - | - | - | - | FAIL(run 応答なし) |"); overall=1; continue
     fi
     if [[ "$runline" == *"run err"* ]]; then
-        ROWS+=("| $label | - | - | - | - | - | - | FAIL(${runline#*MBCMD: }) |"); overall=1; continue
+        ROWS+=("| $label | - | - | - | - | - | - | FAIL(${runline#*KBCMD: }) |"); overall=1; continue
     fi
     if ! wait_line 'app: app_init\(\)' "$mark" 20 >/dev/null; then
         ROWS+=("| $label | - | - | - | - | - | - | FAIL(app_init に到達せず) |"); overall=1; continue
