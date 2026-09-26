@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/cam-rec.sh — Webカメラ(/dev/video0)録画。~/ビデオ/rec.sh の移植。
+# scripts/cam-rec.sh — Webカメラ(/dev/video0)録画。
 #
 # 動画・音声ずれの調査・対処 (2026-07-20, check-workflow-routine 後の別タスク):
 #   - v4l2/pulse とも thread_queue_size 既定(8)を超えて demuxer スレッドが

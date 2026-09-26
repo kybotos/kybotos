@@ -60,7 +60,6 @@ docs/results/)。
    届き先を確かめられるようになったので、Phase 18 では xdotool のクリック + キャプチャで
    画面遷移を確認した(承認済みの設計。本項の「使わない」の見直しは別途承認を得る)。
 9. **キャプチャ出力は `captures/<タスク名>/`**(.gitignore 対象)。
-   Zenn 素材として残すものは `~/ビデオ/zenn-phaseXX/` にコピー。
 10. `.claude/settings.local.json` の permissions 追記が必要になったら、
     内容を提示してユーザーに依頼する(勝手に権限前提の手順へ変えない)。
 
@@ -662,7 +661,7 @@ down split して積む。プロンプトとの高さ比率は `HPANE_PROMPT_ROW
 | `esp32-monitor` | シリアルモニタ(常駐) | `send` で起動、`waitfor` でログ待ち |
 | `unix-build` | Linux ホスト(SDL)ビルド / 実行 | 一発コマンド |
 | `camera` | カメラ撮影(ffmpeg / v4l2-ctl、`scripts/cam-rec.sh`/`cam-still.sh`) | `send`(常駐)+ `run`(単発) |
-| `zenn` | Zenn ドキュメント作成関連 | 一発コマンド |
+| `zenn` | 予備(文書まわりの作業など。ラベル名は旧用途のまま) | 一発コマンド |
 | `screen` | Linux ホスト(SDL ウィンドウ)の画面撮影用(`scripts/screen-rec.sh`/`screen-still.sh`)。**Phase 18 でウィンドウ単位の取得(`xwd -id` / `import -window`)に切り替えて使えるようになった**(x11grab は黒くなるので使わない) | `send`(録画、Enter で停止)+ `run`(静止画) |
 
 新しいラベルを増やす場合は事前にユーザーの承認を得ること。

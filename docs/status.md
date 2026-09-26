@@ -23,7 +23,6 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   docs/prompts/check-workflow.md 追記節、docs/results/check-workflow.md)。
 - Phase 7(7A 予約発音 / 7B メトロノーム / 7B-fix DMA 二重クリック / 7C トーンパレット /
   7D テンポ1刻み・ボリューム調整)完了。詳細は docs/results/phase07.md。
-- Zenn 連載: 第 1〜7 回公開済み、第 8〜17 回はスケジュール公開設定済み(〜2026-07-28、詳細は docs/zenn.md)。
 - Phase 8a(docs/prompts/phase08a_midi_out_bringup.md、MIDI OUT 疎通確認)完了。
   自作 MIDI OUT 回路(GPIO18=UART1 TX、2SC1815)を UM-ONE 経由で確認、
   UM-ONE LED 点灯・`aseqdump` で Note On/Off 正常受信を確認。検証専用コードは
@@ -586,7 +585,7 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     **SG02 で Session 1 → 5 → 1、SG01 で 7 回すべて期待どおり**に切り替わり、
     **切り替わる位置は実機の小節の頭とそろっていた**(テンポ 120 → 100 と 3/4・7/8 を含む)。
     → **`PC_LEAD_TICKS = 960`(4 分音符 1 つ)は妥当**と確認(spec §4.2 の未検証の前提を消化)。
-    デモ動画 6 分 13 秒(`~/ビデオ/zenn-phase19/phase19-slmk3-e2e.mp4`)。Song の 3 画面は実機のタッチでも操作できた。
+    デモ動画 6 分 13 秒(手元に保存)。Song の 3 画面は実機のタッチでも操作できた。
   - **未実施 / 持ち越し**: **Q6(カウントイン)はユーザー判断「まだ判断できない」で持ち越し**、
     **U-6(`.wasm` を PSRAM へ)は未着手**、**1 回だけ最後の 1 小節が鳴らなかった事象(再現せず)は要監視**。
 

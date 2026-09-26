@@ -2,6 +2,7 @@
 name = "appui"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 
 # MidiAppBox の共通 UI 部品(Host API 非依存)。アプリではないので rlib のまま。
 # 操作規約: docs/design/ui-conventions.md / 記録: docs/results/phase16-21-platform.md §4(Phase 18a)

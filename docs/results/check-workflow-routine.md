@@ -111,7 +111,7 @@ image header(2048k). Using the size in the binary image header.` が出ていた
   `758411e`)。
 - 上記の動作確認のため `unix-build` を一度ビルドしたところ、
   `hosts/linux/build/` の `CMakeCache.txt` が旧リポジトリパス
-  (`/home/wurly/project/esp32/MidiAppBox`)を指しており cmake がエラー
+  (旧 repo の置き場所)を指しており cmake がエラー
   (想定外の失敗のため一旦報告して停止)。ユーザー指示により
   「ビルドキャッシュ関連エラー時のみ `build/` 等をクリーンにして再実行する
   (毎回のクリーンビルドはしない)」旨を docs/workflow.md §3 に追記

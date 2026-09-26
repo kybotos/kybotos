@@ -1,39 +1,48 @@
-name: Build in esp32-builder
+name: Build
 
+# ビルドが通ることだけを確かめる(成果物は残さない。ファームのバイナリを配布するときは、
+# MP3 デコーダー(Helix、RPSL)の通知を README とあわせて用意すること)。
 on:
   workflow_call:
-    inputs:
-      namespace:
-        type: string
-        required: true
-      artifact_name:
-        type: string
-        default: MidiAppBox
-        required: true
+
 jobs:
-  build:
+  firmware:
+    name: Firmware (ESP32-S3)
     runs-on: ubuntu-24.04
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          repository: wurly200a/MidiAppBox
-          ref: ${{ inputs.project_ref }}
-          submodules: recursive
+      - uses: actions/checkout@v4
+      # README と同じイメージ。コンテナの entrypoint が作業ディレクトリの所有者に合わせて降格する
+      - name: idf.py build
+        run: |
+          docker run --rm -v "$PWD:/workspaces/MidiAppBox" -w /workspaces/MidiAppBox/src \
+            ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
+            bash -c 'source /opt/esp-idf/export.sh && idf.py build'
+      - name: dependencies.lock is unchanged
+        run: git diff --exit-code -- src/dependencies.lock
 
-      - name: Build in the devcontainer
-        uses: devcontainers/ci@v0.3
-        with:
-          configFile: .devcontainer/devcontainer.json
-          push: never
-          runCmd: |
-            set -euo pipefail
-            cd src
-            idf.py build
+  linux-host:
+    name: Linux host
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2 / ALSA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev libsdl2-mixer-dev libasound2-dev
+      - name: Build and run the unit tests
+        run: |
+          cmake -S hosts/linux -B hosts/linux/build
+          cmake --build hosts/linux/build -j
+          ctest --test-dir hosts/linux/build --output-on-failure
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: src/build/midi_app_box.*
+  appui:
+    name: appui (Rust)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test and build for wasm32
+        working-directory: wasm-apps/appui
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo test --features std
+          cargo build --release --target wasm32-unknown-unknown
