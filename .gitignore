@@ -11,3 +11,6 @@ tools/midi_clock_probe/build/
 
 # Python のバイトコード(scripts/ の判定スクリプトを import したときにできる)
 __pycache__/
+
+# エディタのロックファイル(Emacs)
+.#*

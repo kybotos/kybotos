@@ -7,7 +7,7 @@
 | 対象 | 内容 |
 |---|---|
 | ライセンス | **MIT → Apache License 2.0**(`LICENSE` を差し替え、`NOTICE` を追加、`wasm-apps/appui/Cargo.toml` に `license`)。特許の許諾を含み、依存の WAMR / esp-audio-player とも揃う |
-| README | Kybotos として書き直した(構成、ビルドと書き込み、Linux ホスト、アプリの作り方、回帰、ライセンス、サードパーティ)。**Host API を使うだけのアプリはこの repo の派生物とは考えない**ことを明記 |
+| README | Kybotos として書き直した。**英語の `README.md` と日本語の `README.ja.md`**(互いにリンク)。内容は(構成、ビルドと書き込み、Linux ホスト、アプリの作り方、回帰、ライセンス、サードパーティ)。**Host API を使うだけのアプリはこの repo の派生物とは考えない**ことを明記 |
 | CI | 旧 repo を checkout して devcontainer でビルドしていたのを、**この repo を checkout して README と同じイメージで `idf.py build`** する形に直した。Linux ホストのビルドと単体テスト、`appui` のテストと wasm32 ビルドも足した。**tag で draft の Release を作るジョブと、成果物のアップロードは外した**(バイナリは配布しない。配布するときは Helix MP3 デコーダーの RPSL の通知が要る) |
 | 個人の運用の記述 | 連載記事の運用メモ(`docs/zenn.md`)と、それを指す記述、個人の保存先のパス、イベントの出展予定を外した。`docs/prompts/` / `docs/results/` の中の当時の記述は記録として残す(旧 repo のローカルパス 1 か所だけ伏せた) |
 | `CLAUDE.md` | 見出しを Kybotos に(コードの識別子・パスには旧名 MidiAppBox が残る) |
