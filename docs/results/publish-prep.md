@@ -52,3 +52,9 @@
 | 実機の回帰 5 本(`KBCMD`) | ALL PASS、停止時 `free_int` 150,312 / `largest_int` 102,400 / `free_psram` 8,136,668(改名前と同じ) |
 | 外のアプリを載せた回帰 6 本(実機・Linux)、実機のプール | ALL PASS、値は改名前と同じ |
 | サンプルアプリの `.wasm` | 変わらない |
+
+## 公開(2026-09-26)
+
+- `kybotos/kybotos` に main とタグ(`phase15-start` / `pre-app-prune` / `pre-old-api-removal`)を push して公開した。GitHub はライセンスを Apache-2.0 と認識。
+- **最初の CI は 3 つのジョブ(Firmware / Linux host / appui)とも成功**。
+- `appui` にタグ `appui-v0.1.0` を付けた(この repo の外のアプリが `appui` を git の依存としてタグで固定するため)。
