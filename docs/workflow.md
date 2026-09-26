@@ -186,9 +186,9 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
   # shared/seq_core.c の単体テスト(偽の時計でディスパッチを決定的に進める。Phase 17 で新設)
   ./scripts/hpane.sh run unix-build \
     "cd <repo>/hosts/linux && cmake --build build -j && ctest --test-dir build --output-on-failure" 600000
-  # Rust の crate(wasm-apps/seqcore 等): ホストでのテストと、no_std で通ることの確認
+  # Rust の crate(wasm-apps/appui 等): ホストでのテストと、no_std で通ることの確認
   ./scripts/hpane.sh run unix-build \
-    "cd <repo>/wasm-apps/seqcore && cargo test --features std && \
+    "cd <repo>/wasm-apps/appui && cargo test --features std && \
      cargo build --release --target wasm32-unknown-unknown" 600000
   ```
   **境界の数µs で決まる挙動(「その tick のクロックを出さない」等)は実時間の試験では確かめられない。**
