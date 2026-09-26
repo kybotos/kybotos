@@ -219,7 +219,7 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
   なる(約 2,000 ターゲット、数分)。計測のために 2 回ビルドすることを見込んで段取りする。
 - 実機の自己検査(`SEQCORE_SELFTEST`)もこの形で有効化する(`shared/seq_core.h` の説明)。
 
-**managed component の版は clone ごとに変わりうる**(`src/dependencies.lock` が gitignore 対象のため。roadmap U-29)。
+**managed component の版は clone ごとに変わりうる**(`src/dependencies.lock` は gitignore 対象で、**固定せず最新の版に追従する方針**。roadmap U-29)。
 新しい clone で実機の基準値(回帰のしきい値)がずれたら、まず `src/dependencies.lock` の版を前の環境と比べる
 (2026-09-26 に LVGL 9.5.0 → 9.6.0~1 で `largest_int` が 4KB 下がった。`docs/results/repo-split.md`)。
 lock を差し替えたときは **`idf.py reconfigure build`**(`build` だけでは lock を読み直さない)。版が変わると

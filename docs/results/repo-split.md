@@ -80,10 +80,15 @@ Sequencer アプリ(`sequencer` / `seqcore`)とその指示書・記録を、非
 
 - 版が変わると `sdkconfig` の LVGL の項目も変わる。**lock を戻すだけではビルドが通らない**(`LV_MEM_SIZE >= 2kB is required` ほか)。
   `src/sdkconfig`(生成物)を消して作り直した。作り直した `sdkconfig` は分割前のものと一致した(`sdkconfig.defaults` 以外の手修正は無かった)。
-- lock を固定するか(コミットするか)は roadmap **U-29**。
+- lock を固定するか(コミットするか)は roadmap **U-29**(下の追記)。
 
 ## 変えていないこと
 
 - Host API、ホストの挙動、サンプルアプリの `.wasm`。
 - 回帰のしきい値。
 - 識別子の `midibox_*` / `MIDIBOX_*` / `MBCMD`、docker のマウント先 `/workspaces/MidiAppBox`(改名は別の作業)。
+
+## 追記 (2026-09-26)
+
+- **U-29 はユーザー判断でクローズ**: `dependencies.lock` はコミットせず、managed component は最新の版に追従する。
+  版がずれるのは clone し直したときだけで、回帰(停止時の値としきい値)で今回のように気づけるため、従来の運用のままにする。
