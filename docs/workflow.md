@@ -106,7 +106,8 @@ docs/results/)。
 - **検証に使ったスクリプトは `scripts/` に置いてコミットする**(Phase 21d でユーザー決定)。
   一時ディレクトリ(scratchpad)に置いたまま済ませない。実施記録に書いた数値を後から出し直せるようにするため。
   - **ファイル名**: シェルは `kebab-case.sh`、Python は `snake_case.py`(`import` できるように)。
-    **特定のアプリに依存するものは名前にアプリ名を入れる**(例 `sequencer-drum-wav.sh`)。
+    **特定のアプリに依存するものは名前にアプリ名を入れる**(例 `<app>-song-wav.sh`)。
+    この repo の外のアプリ用のスクリプトは、そのアプリの repo に置く。
   - **冒頭のコメント**に、用途・使い方(引数)・どの手順(本書の節)の一部か・作ったフェーズを書く。
   - **ホストを起動するスクリプトは、ホストを自分の子として起動する**(`hpane.sh send` でペインへ送らない)。
     スクリプト自体を `hpane.sh run` で走らせると、send が**自分を走らせているペインに割り込む**ため。
@@ -218,6 +219,12 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
   なる(約 2,000 ターゲット、数分)。計測のために 2 回ビルドすることを見込んで段取りする。
 - 実機の自己検査(`SEQCORE_SELFTEST`)もこの形で有効化する(`shared/seq_core.h` の説明)。
 
+**managed component の版は clone ごとに変わりうる**(`src/dependencies.lock` が gitignore 対象のため。roadmap U-29)。
+新しい clone で実機の基準値(回帰のしきい値)がずれたら、まず `src/dependencies.lock` の版を前の環境と比べる
+(2026-09-26 に LVGL 9.5.0 → 9.6.0~1 で `largest_int` が 4KB 下がった。`docs/results/repo-split.md`)。
+lock を差し替えたときは **`idf.py reconfigure build`**(`build` だけでは lock を読み直さない)。版が変わると
+LVGL の Kconfig が変わって `sdkconfig` が合わなくなるので、**生成物の `src/sdkconfig` を消して作り直す**(手修正は入っていないこと)。
+
 `managed_components/`(gitignore 対象)を「再取得可能なキャッシュ」と即断して
 中身を確認せず `rm -rf` してはならない。ハッシュ不一致で `idf.py fullclean` が
 保護的に停止した場合、削除前に該当ファイルの差分を確認すること(ローカル修正が
@@ -321,6 +328,15 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
 - スクリプトは実行前に `docker ps` を見て、シリアルポートを掴んだままの
   `idf.py monitor` コンテナがあれば落とす(既知の教訓)。終了時も同様に片付ける
   (`--keep-monitor` で残せる)。
+- **この repo の外のアプリを回すとき**: そのアプリを `KYBOTOS_EXTRA_APPS` で埋め込んだファームを、
+  **別のビルドディレクトリ**でビルド・フラッシュしておく(`src/components/wasm_runtime/CMakeLists.txt` の冒頭)。
+  回帰は、`scripts/device-regress.conf` を source して `APPS`(と Linux 用の `APP_WASM`)を足した conf を `--conf` で渡し、
+  モニタがそのビルドの ELF を読むように `--build-dir <コンテナ内のパス>` と `--mount <ホスト>:<コンテナ>` を付ける
+  (`device-pool.sh` も同じオプションを取る)。
+  ```bash
+  ./scripts/device-regress.sh --task <タスク名> --conf <外の conf> \
+      --mount <外の repo>:/workspaces/<名前> --build-dir /workspaces/<名前>/build/fw
+  ```
 - 実機側の受け口は USB Serial/JTAG のコマンドコンソール
   (`ping` / `ls` / `run <app>` / `stop` / `heap`。応答はタグ `MBCMD` のログ行)。
   **タッチ・電源キーの既存操作系は変更していない。**
@@ -344,11 +360,11 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
 - **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
   (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
   取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
-  `MBCMD: ready` の後にシリアルから `run <app>` を 1 回だけ送る**(Phase 21c で sequencer をこの形で測った)。
+  `MBCMD: ready` の後にシリアルから `run <app>` を 1 回だけ送る**(Phase 21c で導入)。
   ```bash
   ./scripts/hpane.sh send esp32-monitor "<§3.2 のモニタ起動コマンド(tee 先は captures/<タスク名>/pool.log)>"
   # ログファイルに `MBCMD: ready` が出るのを待ってから
-  ./scripts/hpane.sh send esp32-monitor "run sequencer"
+  ./scripts/hpane.sh send esp32-monitor "run <app>"
   grep -a "wamr pool" captures/<タスク名>/pool.log   # total / free / highmark
   ./scripts/hpane.sh send esp32-monitor "stop"
   ```
@@ -460,16 +476,19 @@ DISPLAY=:0 xdotool click --window "$WIN" 1
   **ドラッグは実ポインタを動かす**ので、スクリプトが毎回クライアント原点を較正してから絶対座標で動かす(`docs/lessons.md` Phase 21b)。
   **点滅は 1 枚では判定できない**ので、数枚撮って同じ画素を並べる(`convert <png> -format '%[pixel:p{x,y}]' info:`)。
 
-### 3.7 Linux ホストの回帰(6 本)(Phase 20 で明文化)
+### 3.7 Linux ホストの回帰(5 本)(Phase 20 で明文化)
 
 実機の自動回帰(§3.4)に対応する Linux 側。**フェーズ末に毎回やる**ので手順を固定する。
-対象は `scripts/device-regress.conf` の `APPS` と同じ 6 本
-(touch_demo / mp3player / metronome / midi_loopback / seq_smoke / sequencer)。
+対象は `scripts/device-regress.conf` の `APPS` と同じ 5 本
+(touch_demo / mp3player / metronome / midi_loopback / seq_smoke)。
+この repo の外のアプリを足して回すときは、§3.4 と同じ conf を `--conf` で渡す
+(`.wasm` のパスは conf の `APP_WASM[<app>]`)。
 
 **`scripts/linux-regress.sh <タスク名>` が以下をそのまま回す**(Phase 21d。全 PASS で exit 0、1 行 1 アプリで highmark も出す):
 
 ```bash
 ./scripts/hpane.sh run unix-build "<repo>/scripts/linux-regress.sh <タスク名>" 300000
+./scripts/hpane.sh run unix-build "<repo>/scripts/linux-regress.sh --conf <外の conf> <タスク名>" 300000   # 外のアプリを足すとき
 ```
 
 手で回すときは、各アプリについて次を順に行う:
@@ -534,12 +553,6 @@ grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録
 ```bash
 python3 scripts/wav_onsets.py captures/<タスク名>/out.wav 120 "4/4:0,8|3/4:4,8"   # 小節ごとに「拍子:鳴るステップ」
 python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24                  # 途切れない音(全ステップ ON など)
-./scripts/sequencer-drum-wav.sh <タスク名> <Drum 一覧の行> <名前> <秒>            # sequencer のクリップを RPT ON で録る
-./scripts/sequencer-song-wav.sh <タスク名> <Song 一覧の行> <名前> <秒> [<ms> <タイル>]  # Song を頭から録る(指定すれば再生中にタイルをタップしてジャンプ。Phase 21e)
-./scripts/sequencer-grid-wav.sh <タスク名> <Song 一覧の行> <タイル> <1> <RPT> <名前> <秒> [<ms> <マスの行> <一覧の行>]
-                                  # Chapter のグリッドからトグルを決めて録る(指定すれば再生中に Drum のマスを編集し、▶ からの秒数を .times に残す。Phase 21f)
-./scripts/sequencer-grid-pc.sh <タスク名> <Song 一覧の行> <タイル> <1> <RPT> <ms> <名前> <秒>
-                                  # グリッドから再生し、▶ から ms 後に `1` を押して、PC を aseqdump で記録する(Phase 21f)
 ```
 
 - **期待時刻との突き合わせは「直前に一致した発音」を基準に追従させる。** Linux の WAV の時計は約 0.2% 進み、
@@ -554,10 +567,10 @@ python3 scripts/wav_steps.py  captures/<タスク名>/out.wav 120 24            
   **どのステップも同じくらいの比(21d の実測で 3.5〜4.4)なら欠けは無い。**
 
 - **再生中の操作の検証(Phase 21f)**: 「次の小節から効くか」は**操作した時刻がその小節を積んだ後かどうか**で意味が変わる。
-  スクリプトが残す「▶ から操作までの秒数」と小節の頭の時刻を突き合わせてから、WAV の一致を読む。
-  PC は `sequencer-grid-pc.sh` の aseqdump の出力で **PC の前の Clock を数える**と、どの境界の何拍前に出たかが分かる(PC は境界の 24 クロック前が正常)。
-- **Song 全体の判定(Phase 21e)**: 先頭の小節が休符なら、`wav_onsets.py` は最初の立ち上がりを 0 とするので、**仕様は最初に鳴る小節から書く**。
-  小節ごとの拍子を並べれば、拍子の混在とクリップの切り詰め(Control を正とする)もそのまま判定できる。
+  検証スクリプトに「再生開始から操作までの秒数」を残させ、小節の頭の時刻と突き合わせてから、WAV の一致を読む。
+  MIDI のメッセージ(PC など)は aseqdump の出力で **その前の Clock を数える**と、どの境界の何拍前に出たかが分かる。
+- **曲全体の判定(Phase 21e)**: 先頭の小節が休符なら、`wav_onsets.py` は最初の立ち上がりを 0 とするので、**仕様は最初に鳴る小節から書く**。
+  小節ごとの拍子を並べれば、拍子の混在もそのまま判定できる。
 
 **内蔵音源と外部音源(MIDI OUT)の時間差(Phase 21e、roadmap U-22 の V6)**
 

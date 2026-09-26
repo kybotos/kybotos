@@ -45,7 +45,7 @@
 /* 実機は Phase 7B で 64→48KB。Linux も長く同じ 48KB にしていたが、x86_64 では WAMR の
  * 構造体(ポインタ)が大きく、同じ .wasm でもプール消費が実機より大きい。Phase 18 の
  * sequencer(コード 13KB)は実機の 48KB で起動するが、Linux では load 時の最大消費が
- * 58.8KB になり「allocate memory failed」で起動しなかった(docs/results/phase18.md)。
+ * 58.8KB になり「allocate memory failed」で起動しなかった(docs/results/phase16-21-platform.md §3)。
  * Linux は内部 RAM の制約が無いので 96KB にする。実機の余裕は実機のログで見る。 */
 static uint8_t s_wamr_heap[256 * 1024]; /* Phase 19a: タイル表示で 96KB を超えたので 192KB へ。
                                          * Linux は internal RAM の制約が無いので、実機の判断と

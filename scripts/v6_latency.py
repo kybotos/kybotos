@@ -5,7 +5,7 @@ usage: python3 scripts/v6_latency.py WAV [OFFSET_MS]
   WAV       = ステレオの録音。**L = 実機の内蔵スピーカー(マイク)、R = 外部音源(ライン)**
   OFFSET_MS = 外部音源の Note On を内蔵音より何 ms 後に予約したか(既定 250 = 120bpm で 480 tick)
 
-測り方(docs/results/phase21e.md「U-22 の V6」): 同じ tick に置くと 1 本の録音で 2 つの音が重なって分けられないので、
+測り方(docs/results/phase16-21-platform.md §6): 同じ tick に置くと 1 本の録音で 2 つの音が重なって分けられないので、
 **外部音源の Note On を内蔵音の既知の量だけ後ろに予約**し、R の立ち上がりごとに「L の直前の立ち上がりとの間隔 − OFFSET」を出す。
 正なら MIDI OUT(外部音源)の方が遅い。両方とも同じスケジューラの tick 予約なので、差は経路(内蔵音源のブロック丸め /
 DIN 送信 / 外部音源の応答)の差だけになる。**マイク側は空気中の伝搬(10cm で約 0.3ms)を含む。**

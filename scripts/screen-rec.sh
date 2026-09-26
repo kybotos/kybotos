@@ -3,7 +3,7 @@
 #
 # Phase 18 で方式を変更した: x11grab は画面全体を読むためこの環境では黒くなる。
 # ウィンドウ ID を指定した `xwd -id` を一定間隔で連続取得し、停止後に ffmpeg で mp4 にまとめる
-# (docs/results/phase18.md 0-0)。フレーム間隔は sleep による概算なので、UI の動作確認用であり
+# (docs/results/phase16-21-platform.md §5)。フレーム間隔は sleep による概算なので、UI の動作確認用であり
 # タイミング測定には使わない。音声トラックは含めない。
 #
 # 使い方: scripts/screen-rec.sh [出力先ディレクトリ]  (省略時 captures/check-workflow/)

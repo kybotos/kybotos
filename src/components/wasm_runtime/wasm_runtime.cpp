@@ -39,7 +39,7 @@ static const char* TAG = "WASM";
 // **残りが 2KB を切ったら次のフェーズが入らない**と考えて 16KB 足した。
 // 代償は internal の静的 +16KB で、**回帰のしきい値(`scripts/device-regress.conf` の
 // `MIN_FREE_INT` / `MIN_LARGEST_INT`)を新しい基準値に合わせて下げてある**。
-// 判断の記録は docs/architecture.md §9 と docs/results/phase19.md。
+// 判断の記録は docs/architecture.md §9 と docs/results/phase16-21-platform.md §3。
 //
 // **Phase 19b で 96KB にした(ユーザー承認済み)。** タイルの編集(追加 / 並べ替え / 削除 / 名称)を
 // 積むと 80KB では足りない見込みだったため。**同時に U-6 を実施して `.wasm` バッファを PSRAM へ移した**
@@ -78,7 +78,7 @@ static const char* TAG = "WASM";
 // sequencer(`.wasm` 62,445 B、21d から +9.7KB)は **160KB では `create_exec_env failed`**、
 // 168KB で起動した(highmark 148,280)。**160KB で落ちたので「total − highmark」の残りは当てにならず**、
 // 168KB の本当の余裕は 8KB 以下としか言えない。ゲート(残り 2KB)を確実に満たすため 1 段上の 176KB にした
-// (docs/results/phase21e.md「.wasm サイズと WAMR プール」)。
+// (docs/results/phase16-21-platform.md §3)。
 static constexpr size_t kWamrPoolBytes = 176 * 1024;
 static uint8_t* s_wamr_heap = nullptr;
 

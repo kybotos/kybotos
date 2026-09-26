@@ -20,6 +20,12 @@
 # 使い方:
 #   scripts/device-regress.sh [--task <name>] [--apps "a b c"] [--hold <sec>]
 #                             [--conf <path>] [--keep-monitor]
+#                             [--build-dir <コンテナ内のパス>] [--mount <ホスト>:<コンテナ>]
+#
+#   --build-dir / --mount は、この repo の外のアプリを埋め込んだファーム(src/CMakeLists の
+#   KYBOTOS_EXTRA_APPS。別のビルドディレクトリでビルドする)を回すためのもの。モニタの
+#   idf.py に `-B` を、docker に `-v` を足す(--mount は複数回指定できる)。
+#   対象アプリの追加は --conf で渡す設定ファイルで行う(この repo の conf を source してから足す)。
 
 set -uo pipefail
 
@@ -33,6 +39,8 @@ TASK="device-regress"
 APPS_OVERRIDE=""
 HOLD_OVERRIDE_ARG=""
 KEEP_MONITOR=0
+IDF_BUILD_ARG=""
+EXTRA_MOUNTS=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -41,7 +49,9 @@ while [ $# -gt 0 ]; do
         --hold)  HOLD_OVERRIDE_ARG="$2"; shift 2 ;;
         --conf)  CONF="$2"; shift 2 ;;
         --keep-monitor) KEEP_MONITOR=1; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        --build-dir) IDF_BUILD_ARG="-B $2"; shift 2 ;;
+        --mount) EXTRA_MOUNTS="$EXTRA_MOUNTS -v $2"; shift 2 ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -56,7 +66,7 @@ LOG="$OUT/monitor.log"
 REPORT="$OUT/report.md"
 mkdir -p "$OUT"
 
-DOCKER_RUN="docker run --rm -it -v $REPO:/workspaces/MidiAppBox -w /workspaces/MidiAppBox/src --device=$PORT --group-add $(stat -c '%g' "$PORT") $IMAGE"
+DOCKER_RUN="docker run --rm -it -v $REPO:/workspaces/MidiAppBox$EXTRA_MOUNTS -w /workspaces/MidiAppBox/src --device=$PORT --group-add $(stat -c '%g' "$PORT") $IMAGE"
 
 say() { printf '%s\n' "$*" >&2; }
 
@@ -120,7 +130,7 @@ rm -f "$LOG"
 
 say "starting monitor (log: $LOG)"
 "$HPANE" send esp32-monitor \
-    "$DOCKER_RUN bash -c 'source /opt/esp-idf/export.sh && PYTHONUNBUFFERED=1 idf.py -p $PORT monitor | tee /workspaces/MidiAppBox/captures/$TASK/monitor.log'" \
+    "$DOCKER_RUN bash -c 'source /opt/esp-idf/export.sh && PYTHONUNBUFFERED=1 idf.py $IDF_BUILD_ARG -p $PORT monitor | tee /workspaces/MidiAppBox/captures/$TASK/monitor.log'" \
     >/dev/null 2>&1
 
 # モニタ起動はボードをリセットするので、新しい起動の完了を待つ

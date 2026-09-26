@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 # scripts/linux-regress.sh — Linux ホストの回帰(docs/workflow.md §3.7 の手順をそのままスクリプトにしたもの。Phase 21d)。
 #
-#   linux-regress.sh TASK     → captures/TASK/regress/<app>.log、1 行 1 アプリの要約。全 PASS なら exit 0
+#   linux-regress.sh [--conf <path>] TASK
+#     → captures/TASK/regress/<app>.log、1 行 1 アプリの要約。全 PASS なら exit 0
 #
-# 対象は scripts/device-regress.conf の APPS と同じ 6 本。各アプリを起動 → pgrep で起動を確かめる →
+# 対象は scripts/device-regress.conf の APPS(実機の回帰と同じ)。`.wasm` は wasm-apps/<app>/<app>.wasm、
+# conf の APP_WASM[<app>] があればそのパス。この repo の外のアプリを足して回すときは、この conf を source して
+# APPS と APP_WASM を足した conf を --conf で渡す。各アプリを起動 → pgrep で起動を確かめる →
 # 5 秒保持 → pid と一致するウィンドウへ ESC → 終了を待つ → ログで判定(started / stopped 各 1 以上、警告 0)。
 # **highmark(WAMR プール消費)も出す**ので、前フェーズの値と突き合わせる。
 # **実機の回帰(device-regress.sh)と同時に走らせない**(§3.4)。
 # 実行: ./scripts/hpane.sh run unix-build "<repo>/scripts/linux-regress.sh <タスク名>" 300000
 set -u
 REPO=$(cd "$(dirname "$0")/.." && pwd)
+CONF=$REPO/scripts/device-regress.conf
+if [ "${1:-}" = "--conf" ]; then CONF=$2; shift 2; fi
 TASK=$1
 OUT=$REPO/captures/$TASK/regress; mkdir -p "$OUT"
 export DISPLAY=${DISPLAY:-:0}
 # shellcheck disable=SC1091
-. "$REPO/scripts/device-regress.conf"
+. "$CONF" || { echo "cannot read conf: $CONF" >&2; exit 2; }
+declare -p APP_WASM >/dev/null 2>&1 || declare -A APP_WASM=()
 fail=0
 for app in $APPS; do
   # ホストはこのスクリプトの子として起動する(ペインへ send すると、このスクリプトを走らせているペインに割り込む)
-  (cd "$REPO/hosts/linux" && ./build/midibox_host "../../wasm-apps/$app/$app.wasm" > "$OUT/$app.log" 2>&1 &)
+  wasm=${APP_WASM[$app]:-$REPO/wasm-apps/$app/$app.wasm}
+  (cd "$REPO/hosts/linux" && ./build/midibox_host "$wasm" > "$OUT/$app.log" 2>&1 &)
   for _ in $(seq 1 60); do pgrep -x midibox_host >/dev/null && break; sleep 0.25; done
   sleep 5
   pid=$(pgrep -x midibox_host | head -1); WIN=""

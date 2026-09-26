@@ -2,6 +2,8 @@
 
 各エントリの詳細は `docs/results/` の該当ファイルを参照。このファイルは
 CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)。
+日付ごとの節は当時のスナップショットで、書き換えない。**「(非公開)」を付けたファイルは、
+2026-09-26 の repo の分割で非公開の app-sequencer へ移ったもの**(最新の節を参照)。
 
 ## 2026-08-23 時点
 
@@ -417,14 +419,14 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
 
 ## 2026-09-13 時点
 
-- **Sequencer トラックを開始。** 仕様 `docs/apps/sequencer/spec.md`、フェーズ計画は
+- **Sequencer トラックを開始。** 仕様 Sequencer の仕様(非公開)、フェーズ計画は
   `docs/roadmap.md`(「① フェーズ計画 / ② フェーズ未割当の課題」の 2 部構成に再編。
   以後のフェーズ計画はここだけを更新する)。**MIDI Clock の 115–119bpm 問題はクローズ**
   (Phase 9c〜14 で解決済み・再発なし。roadmap U-1)。
 
-- **Phase 16(docs/prompts/phase16.md、Sequencer コアと Host API ギャップ分析)完了(2026-09-13)。**
-  詳細は `docs/results/phase16.md`。
-  - **`wasm-apps/seqcore/`** を新設。Host API に依存しない `no_std` の rlib で、依存 crate は 0 個
+- **Phase 16(docs/prompts/phase16.md(非公開)、Sequencer コアと Host API ギャップ分析)完了(2026-09-13)。**
+  詳細は `docs/results/phase16.md`(非公開)。
+  - **`seqcore`(非公開)** を新設。Host API に依存しない `no_std` の rlib で、依存 crate は 0 個
     (`heapless` の代わりに自前の `FixedVec`)。データモデル(spec §3)・解決規則
     (`effective_tempo` / `effective_meter`)・Transport 状態機械(Song / Session scope、
     4 通りのトグル、`QueuedAction`)を持ち、小節境界で送るべきもの(Start / Stop / PC /
@@ -465,8 +467,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     - `device-regress.conf` の seq_smoke 保持時間を 60 秒に変更
   - **次**: Phase 18(Session 画面 + 単体再生)の指示書作成と、そのときの `docs/roadmap.md` 更新。
 
-- **Phase 18d(docs/prompts/phase18d.md、小節ごとの拍子とその編集)完了(2026-09-20)。**
-  詳細は `docs/results/phase18d.md`。
+- **Phase 18d(docs/prompts/phase18d.md(非公開)、小節ごとの拍子とその編集)完了(2026-09-20)。**
+  詳細は `docs/results/phase18d.md`(非公開)。
   - **データモデルを変えた**: `Session.meter`(既定)+ `bar_meter`(変化点の上書き)をやめ、
     **`meters: [TimeSig; 16]` = 各小節が自分の拍子を持つ**形に。`Bank::new()` は全ビット 0 のまま。
     `Session::new` は「全小節をその拍子にする」意味になり、`meter_at` / `set_meter_at` を追加。
@@ -484,8 +486,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     **プール拡大で基準値が変わった**(free_int 105,832 → **89,368**、largest_int 57,344 → **40,960**。
     しきい値まで 9.4KB / 8.2KB)。実機のタッチ確認(18b〜18d の操作感)は未実施。
 
-- **Phase 18c(docs/prompts/phase18c.md、Session と小節の増減)完了(2026-09-20)。**
-  詳細は `docs/results/phase18c.md`。**編集機能の方針転換の 1 歩目**(spec §1.3 を改訂)。
+- **Phase 18c(docs/prompts/phase18c.md(非公開)、Session と小節の増減)完了(2026-09-20)。**
+  詳細は `docs/results/phase18c.md`(非公開)。**編集機能の方針転換の 1 歩目**(spec §1.3 を改訂)。
   - **行頭に `-`、最後の要素の次の行に `+`。`-` の長押し(点滅 → 離す)で削除、`+` のタップで追加。**
     **できないとき(再生中の Session・上限・最後の 1 小節)は記号を出さない。**
   - `seqcore` に `insert_bar` / `remove_bar`(**拍子の上書きをシフト**)/ `free_slot` /
@@ -502,8 +504,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     **実機のタッチ操作(削除・追加)はユーザーが確認済み**(2026-09-20、指摘なし。映像は残していない)。
   - **回帰は 18b とあわせて未実施**(ユーザー指示。Phase 18 シリーズの最後にまとめて回す)。
 
-- **Phase 18b(docs/prompts/phase18b.md、ヘッダに操作を集約する)完了(2026-09-20)。**
-  詳細は `docs/results/phase18b.md`。18a の試用で出た 3 点を直した。
+- **Phase 18b(docs/prompts/phase18b.md(非公開)、ヘッダに操作を集約する)完了(2026-09-20)。**
+  詳細は `docs/results/phase18b.md`(非公開)。18a の試用で出た 3 点を直した。
   - **パンくず(ヘッダ左)のタップで 1 階層戻る。** 最上位では何もしない(アプリを終了させるのは HW キーだけ)。
   - **BPM は Tempo 画面をやめ、ヘッダ右の長押し + 左右ドラッグ(シャトル)**で変える。
     **変位が「速さ」**(12px で 1bpm/秒、40px で 4、80px で 12)。変更中は文字が黄色で点滅する。
@@ -521,8 +523,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     **回帰はユーザー指示により今回は実施せず**(Phase 19 で必ず回す)。
     実機のタッチ操作は**ユーザーが確認済み**(2026-09-20、指摘なし。映像は残していない)。
 
-- **Phase 18a(docs/prompts/phase18a.md、対話規約の確定と Sequencer への適用)完了(2026-09-20)。**
-  詳細は `docs/results/phase18a.md`、規約の原本は **`docs/design/ui-conventions.md`(新設)**、
+- **Phase 18a(docs/prompts/phase18a.md(非公開)、対話規約の確定と Sequencer への適用)完了(2026-09-20)。**
+  詳細は `docs/results/phase18a.md`(非公開)、規約の原本は **`docs/design/ui-conventions.md`(新設)**、
   決定記録は `docs/architecture.md` §11-11。
   - **デバイス共通の対話規約を決めた**: **HW キー短押し = 1 階層戻る / 最上位でアプリ終了**、
     タップ = 主アクション、**長押しは成立で点滅 → 離して実行**、**縦スワイプ = スクロール**、
@@ -541,9 +543,9 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **申し送り**: **実機 WAMR プールの残りが 3,432 B / 48,960 B**。`.wasm` +436 B に対しプールは +2,312 B
     増えた(限界費用は約 5 倍)ので、**Phase 19 では roadmap U-16(プールの拡大)を先に片付ける**。
 
-- **Phase 18(docs/prompts/phase18.md、Session 画面と単体再生 = Sequencer app の初回 `.wasm`)完了(2026-09-13)。**
-  詳細は `docs/results/phase18.md`。
-  - **`wasm-apps/sequencer/`**(`.wasm` 14,819 B)
+- **Phase 18(docs/prompts/phase18.md(非公開)、Session 画面と単体再生 = Sequencer app の初回 `.wasm`)完了(2026-09-13)。**
+  詳細は `docs/results/phase18.md`(非公開)。
+  - **`sequencer`(非公開)**(`.wasm` 14,819 B)
     - **3 画面**: Menu / Session 一覧 / Session 画面。描画スロットは全画面で同じ座標を使い回し、rect 14 / text 14
     - **再生**: Play / Stop、トグル `1` / 矢印、再生中小節の点滅、行の長押しジャンプ(Q5)、一覧で BPM±
     - **時間軸**: 計画は **`seqcore::timeline::Planner`**(新設、seqcore のテスト 34 → 44)。先読みは次の 1 小節、変更の締め切りは 150ms
@@ -556,8 +558,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     **Linux だけプールを 96KB にした。** Phase 19 で実機のプールが足りなくなる見込み(申し送り)。
   - **回帰**: 6 本(sequencer を追加、`CLAUDE.md` も更新)。**U-2(同じアプリを 3 回反復して終了値が同一)を `device-regress.sh` に入れて PASS。**
 
-- **Phase 19(docs/prompts/phase19.md、Song / Chapter と arrangement 再生)を実装中(2026-09-21)。
-  実機が使えない回だったので、Linux までで止めてある。** 詳細は `docs/results/phase19.md`。
+- **Phase 19(docs/prompts/phase19.md(非公開)、Song / Chapter と arrangement 再生)を実装中(2026-09-21)。
+  実機が使えない回だったので、Linux までで止めてある。** 詳細は `docs/results/phase19.md`(非公開)。
   - **画面**: Menu の `Song` を有効化し、**Song 一覧 → arrangement → Chapter → Session 画面**を追加
     (スタックの深さ 5。Session 画面は Session ルートと同じ画面で、パンくずだけが変わる)。
     描画スロットは **rect 10 / text 12 のまま**(一覧 4 画面の行を共通化した)。
@@ -588,8 +590,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **未実施 / 持ち越し**: **Q6(カウントイン)はユーザー判断「まだ判断できない」で持ち越し**、
     **U-6(`.wasm` を PSRAM へ)は未着手**、**1 回だけ最後の 1 小節が鳴らなかった事象(再現せず)は要監視**。
 
-- **Phase 19a(docs/prompts/phase19a.md、Song 画面のタイル表示)を実施中(2026-09-21)。**
-  詳細は `docs/results/phase19a.md`。
+- **Phase 19a(docs/prompts/phase19a.md(非公開)、Song 画面のタイル表示)を実施中(2026-09-21)。**
+  詳細は `docs/results/phase19a.md`(非公開)。
   - **arrangement の画面を横 4 × 縦 2 のタイルにした**(演奏中に見て触るメイン画面)。
     1 枚に**左上の `✕` + Chapter 名**と**その Chapter の合計小節数**。9 枚目以降は縦スワイプ。
   - **タップ = ジャンプ**(再生中は次の小節境界、停止中は開始位置の選択 → ▶ でそこから)、
@@ -618,7 +620,7 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **残課題**: **arrangement に枠を足す `+` の入口が無い**(次フェーズで決める)、
     実機のタッチ感の詰め(✕ の帯、スクロールの重さ)、クリック OFF を今の小節から効かせるか。
 
-- **Phase 19b(docs/prompts/phase19b.md、Song タイルの編集)完了(2026-09-21)。** 詳細は `docs/results/phase19b.md`。
+- **Phase 19b(docs/prompts/phase19b.md(非公開)、Song タイルの編集)完了(2026-09-21)。** 詳細は `docs/results/phase19b.md`(非公開)。
   - **編集を「長押しで入る編集モード」に統一した。** **通常時のタイルに ✕ は出ない**。
     長押しで**そのタイルが点滅し続け ✕ が出て**、**✕ = 削除 / 名前 = 名称変更 / ドラッグ = 並べ替え /
     本体 = Session リスト**。**空白・他タイル・HW キー**で抜ける。**再生中は編集モードに入れない**
@@ -639,8 +641,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **残課題**: **実機のタッチ感は未確認**(編集モードの長押し、ドラッグ、✕ の帯)、
     ドラッグはページをまたげない、クリック OFF を今の小節から効かせるか、永続化は Phase 20。
 
-- **Phase 20(docs/prompts/phase20.md、装置全体の永続化)完了(2026-09-21)。**
-  詳細は `docs/results/phase20.md`。
+- **Phase 20(docs/prompts/phase20.md(非公開)、装置全体の永続化)完了(2026-09-21)。**
+  詳細は `docs/results/phase20.md`(非公開)。
   - **Menu に `Save File` / `Load File` を追加**し、**Bank(全 Session + 全 Song)を SD カードの
     8 スロット**(`BANK1.MBB` 〜 `BANK8.MBB`)に保存 / 読み込みできるようにした。
     **起動時の自動ロードもオートセーブもしない**(明示操作のみ。回帰の初期状態を SD に依存させないため)。
@@ -714,8 +716,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     **R-4 MP3 を実際に再生すると internal が 36〜44B 減る**(回帰では検出されない)、
     **R-5 `i2s_channel_preload_data` は 1 ディスクリプタしか埋められない**。
 
-- **Phase 21a(docs/prompts/phase21a.md、ドラムマシンのパターン画面)完了(2026-09-22)。**
-  詳細は `docs/results/phase21a.md`。
+- **Phase 21a(docs/prompts/phase21a.md(非公開)、ドラムマシンのパターン画面)完了(2026-09-22)。**
+  詳細は `docs/results/phase21a.md`(非公開)。
   - **Menu に `Drum Machine`** を足し、**Song のタイルと同形の 4 列 × 2 行**で
     ドラムパターンを打ち込めるようにした。**1 画面 = 1 拍(16 分 × 4)**、
     **横スワイプで拍、縦スワイプでサウンドの組**(Kick/Snare ↔ CHH/Crash)。
@@ -748,7 +750,7 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **ステータス行の当たり判定を記号に合わせて直した**: クリックの記号は x = 252 なのに
     判定が 260 で切れており、**マークの右半分をタップすると ▶ / ■ に入って
     「メトロノームが切れない」**状態だった(全画面共通の不具合)。
-  - **実機の試用所感を D-1〜D-18 として記録**(`docs/results/phase21a.md`)。
+  - **実機の試用所感を D-1〜D-18 として記録**(`docs/results/phase21a.md`(非公開))。
     **最重要は D-1「内蔵スピーカーは低域が出ないので Kick が聞こえない」** —
     **Linux の WAV では判定できない種類の問題**だった。
 
@@ -803,8 +805,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     metronome 22,952 / sequencer 153,288(Linux)。実機の sequencer プール残り **20,696 B**(21b は 18,456)。
   - **残課題**: C-1 touch_demo / seq_smoke / synth_probe のクリックが既定で鳴らない(**roadmap U-25** に起票)、
     C-2 設定が電源で消える(U-24)。
-- **Phase 21d(docs/prompts/phase21d.md、Drum クリップのバンク化と Session と同じ枠組みの編集画面)完了(2026-09-23)。**
-  詳細は `docs/results/phase21d.md`。**Phase 21 を「Drum Track」のフェーズと定め直した最初の回**(ゴールは Drum を Song に組み込むこと。
+- **Phase 21d(docs/prompts/phase21d.md(非公開)、Drum クリップのバンク化と Session と同じ枠組みの編集画面)完了(2026-09-23)。**
+  詳細は `docs/results/phase21d.md`(非公開)。**Phase 21 を「Drum Track」のフェーズと定め直した最初の回**(ゴールは Drum を Song に組み込むこと。
   21e = Chapter の Drum 列と Song 再生、21f = Chapter のグリッド画面)。
   - **`Bank.drums`(1 本)を Drum クリップ D01〜D32 に**。小節ごとに拍子、1 小節は最大 **24 ステップ**(5/4・12/8・6/4 まで。
     7/4 は選べない = 4/4 + 3/4 に分ける運用)。**拍子を減らしても打点は消さずに隠す**。
@@ -820,8 +822,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **検証**: Linux の WAV で 3/4・12/8・5/8・4/4 + 3/4 が小節の長さどおり(抜け 0、ずれ最大 6ms)、全ステップ ON の 12/8 で欠け無し、
     v2 保存 → 読み込み、v1 読み込み。**実機はユーザーが試用して OK**(拍の番号と編集状態の点滅の 2 点をその場で直した)。
   - **回帰 6 本 ALL PASS**(実機・Linux)。既存 5 本の Linux highmark は不変、sequencer は 182,280。
-- **Phase 21e(docs/prompts/phase21e.md、Chapter の Drum 列と Song 再生 + Chapter のグリッド画面)完了(2026-09-23)。**
-  詳細は `docs/results/phase21e.md`。**ステップ 0 の報告後、ユーザーの指示で 21f の「Chapter のグリッド画面」を前倒しした**(21f に残るのは Chapter 単位の再生)。
+- **Phase 21e(docs/prompts/phase21e.md(非公開)、Chapter の Drum 列と Song 再生 + Chapter のグリッド画面)完了(2026-09-23)。**
+  詳細は `docs/results/phase21e.md`(非公開)。**ステップ 0 の報告後、ユーザーの指示で 21f の「Chapter のグリッド画面」を前倒しした**(21f に残るのは Chapter 単位の再生)。
   - **Chapter が Drum の列を持つ**(`{clip, repeat}` の並び、休符 = `0xFF`、最大 16 要素)。**Song 再生で Control(Session の列)の拍子にそろって鳴る**
     (Control の各小節で、クリップの対応する小節の先頭 `min(両者のステップ数)` 個)。Pattern / Session scope の動きは不変。
     **クリップを消すと、参照していた要素はその長さの休符になる**(後ろがずれない)。
@@ -841,8 +843,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **回帰 6 本 ALL PASS**(実機・Linux)。既存 5 本の Linux highmark は不変、sequencer は 213,448。
   - **21f への申し送り**: Chapter のグリッドに `1` / `RPT` を置いて再生(`1` = Chapter。ON なら Chapter を 1 回 / リピート、
     OFF なら Song の最後まで / Song をリピート)、再生中の Drum の編集。
-- **Phase 21f(docs/prompts/phase21f.md、Chapter のグリッドから再生する + 再生中の Drum 編集)完了(2026-09-23)。**
-  詳細は `docs/results/phase21f.md`。
+- **Phase 21f(docs/prompts/phase21f.md(非公開)、Chapter のグリッドから再生する + 再生中の Drum 編集)完了(2026-09-23)。**
+  詳細は `docs/results/phase21f.md`(非公開)。
   - **Song のトグル**: `Scope::Song { song, chapter(= arrangement の枠), repeat }`。arrangement とグリッドに **`1` / ⟲**
     (`1` ON + ⟲ ON = Chapter ループ、`1` ON = Chapter を 1 回、`1` OFF = その枠から最後まで、⟲ ON なら **Song の頭**へ戻る)。
     ループの境界は同じ Session でもキュー PC を送る。ジャンプするとループの対象も移る。**spec Q7 を決着**。
@@ -853,3 +855,18 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     Linux の MIDI で PC の送り直し(時刻前 / 送信後 / 締め切り後)を確認。
     **実機はユーザーが一部を試用し OK(SL MK3 の動作は時間の都合で見ていない。残課題 R-1)**。
   - **回帰 6 本 ALL PASS**(実機・Linux)。既存 5 本の Linux highmark は不変。
+
+## 2026-09-26 時点
+
+- **repo を分割し、Sequencer アプリを非公開の app-sequencer へ移した。** 詳細は `docs/results/repo-split.md`。
+  - この repo に残るのは、仕様(Host API)・ホスト(ESP32-S3 / Linux)・SDK(`appui`)・サンプルアプリ・検証スクリプト。
+    Sequencer(`sequencer` / `seqcore`)と、そのフェーズ(16 / 18〜20 / 21a / 21d〜21f)の指示書・記録は app-sequencer にある。
+    プラットフォーム側の経緯は `docs/results/phase16-21-platform.md`。
+  - **ファームへの埋め込みを表から回す形にした**: 公開アプリの一覧 + CMake 変数 `KYBOTOS_EXTRA_APPS` から
+    `embedded_apps.c`(seed の表)を生成し、launcher はそれを回すだけ。この repo の外のアプリも同じ口で載る。
+  - **回帰は 5 本**(touch_demo / mp3player / metronome / midi_loopback / seq_smoke)。回帰スクリプトは外のアプリを
+    足して回せる(`--conf`、`APP_WASM`、`device-regress.sh` の `--build-dir` / `--mount`)。
+  - 確認: ESP32-S3 / Linux のビルド、Linux の回帰 5 本(highmark は Phase 21f と同じ)、実機の回帰 5 本
+    (停止時 `free_int` 150,312 / `largest_int` 102,400 / `free_psram` 8,136,668 = Phase 21f と同じ)。
+  - **新しい clone では managed component の版が上がる**(LVGL 9.5.0 → 9.6.0~1 など)。そのままだと停止時の値が
+    `free_int` −32 B / `largest_int` 98,304(しきい値ちょうど)になる。lock を固定するかは roadmap U-29。

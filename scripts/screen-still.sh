@@ -3,7 +3,7 @@
 #
 # Phase 18 で方式を変更した: x11grab は画面全体(ルートウィンドウ)を読むため、この環境
 # (Wayland + XWayland / GNOME)では黒くなる。ウィンドウ ID を指定して読む ImageMagick の
-# `import -window` なら SDL ウィンドウの中身が取れる(docs/results/phase18.md 0-0)。
+# `import -window` なら SDL ウィンドウの中身が取れる(docs/results/phase16-21-platform.md §5)。
 #
 # 使い方: scripts/screen-still.sh [出力先ディレクトリ] [ファイル名(拡張子なし)]
 #         (省略時 captures/check-workflow/、screen_still_HHMMSS)
