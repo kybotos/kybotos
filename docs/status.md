@@ -868,5 +868,6 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     足して回せる(`--conf`、`APP_WASM`、`device-regress.sh` の `--build-dir` / `--mount`)。
   - 確認: ESP32-S3 / Linux のビルド、Linux の回帰 5 本(highmark は Phase 21f と同じ)、実機の回帰 5 本
     (停止時 `free_int` 150,312 / `largest_int` 102,400 / `free_psram` 8,136,668 = Phase 21f と同じ)。
-  - **新しい clone では managed component の版が上がる**(LVGL 9.5.0 → 9.6.0~1 など)。そのままだと停止時の値が
-    `free_int` −32 B / `largest_int` 98,304(しきい値ちょうど)になる。lock は固定せず最新の版に追従する(ユーザー判断、roadmap U-29)。
+  - **managed component の版を `src/dependencies.lock` のコミットで固定した**(LVGL 9.5.0 / esp_lvgl_port 2.8.0~1。roadmap U-29)。
+    固定していなかったので、新しい clone では版が上がり(LVGL 9.6.0~1 など)、停止時の値が `free_int` −32 B /
+    `largest_int` 98,304(しきい値ちょうど)になっていた。ESP32-S3 はメモリがシビアなので、他の人のビルドでも同じ版になるようにした。

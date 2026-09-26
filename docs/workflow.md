@@ -219,11 +219,14 @@ pgrep -af midibox_host                          # 残留なしを確認(何も�
   なる(約 2,000 ターゲット、数分)。計測のために 2 回ビルドすることを見込んで段取りする。
 - 実機の自己検査(`SEQCORE_SELFTEST`)もこの形で有効化する(`shared/seq_core.h` の説明)。
 
-**managed component の版は clone ごとに変わりうる**(`src/dependencies.lock` は gitignore 対象で、**固定せず最新の版に追従する方針**。roadmap U-29)。
-新しい clone で実機の基準値(回帰のしきい値)がずれたら、まず `src/dependencies.lock` の版を前の環境と比べる
-(2026-09-26 に LVGL 9.5.0 → 9.6.0~1 で `largest_int` が 4KB 下がった。`docs/results/repo-split.md`)。
-lock を差し替えたときは **`idf.py reconfigure build`**(`build` だけでは lock を読み直さない)。版が変わると
-LVGL の Kconfig が変わって `sdkconfig` が合わなくなるので、**生成物の `src/sdkconfig` を消して作り直す**(手修正は入っていないこと)。
+**managed component の版は `src/dependencies.lock`(コミット済み)で固定している**(roadmap U-29)。ESP32-S3 はメモリがシビアで、
+版が変わると実機の基準値が動く(2026-09-26 に固定していなかった lock で LVGL 9.5.0 → 9.6.0~1 になり、`largest_int` が 4KB 下がった。
+`docs/results/repo-split.md`)。**lock を勝手に更新しない。** 版を上げるのは意図して行う作業で、次の順に行う:
+1. `idf_component.yml` か lock を更新する(`idf.py update-dependencies` など)。
+2. **`idf.py reconfigure build`**(`build` だけでは lock を読み直さない)。版が変わると LVGL の Kconfig が変わって
+   `sdkconfig` が合わなくなるので、**生成物の `src/sdkconfig` を消して作り直す**(手修正は入っていないこと)。
+3. 実機・Linux の回帰を回して基準値を取り直し、しきい値(`scripts/device-regress.conf`)を見直してから、lock をコミットする。
+ビルドのあとに `git status` で lock が変わっていないことを確かめる(変わっていたら版がずれている)。
 
 `managed_components/`(gitignore 対象)を「再取得可能なキャッシュ」と即断して
 中身を確認せず `rm -rf` してはならない。ハッシュ不一致で `idf.py fullclean` が

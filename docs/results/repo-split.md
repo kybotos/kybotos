@@ -92,3 +92,10 @@ Sequencer アプリ(`sequencer` / `seqcore`)とその指示書・記録を、非
 
 - **U-29 はユーザー判断でクローズ**: `dependencies.lock` はコミットせず、managed component は最新の版に追従する。
   版がずれるのは clone し直したときだけで、回帰(停止時の値としきい値)で今回のように気づけるため、従来の運用のままにする。
+
+## 追記 2 (2026-09-26)
+
+- **U-29 の判断を改めた: `src/dependencies.lock` をコミットし、現状の版(LVGL 9.5.0 / esp_lvgl_port 2.8.0~1)で固定する**(ユーザー判断)。
+  ESP32-S3 はメモリがシビアなので、版が上がると、この repo をビルドして使う人の環境で動作を保証できないため。
+  上の追記(「固定しない」)は取り消し。`.gitignore` から lock を外した。`idf.py reconfigure build` で lock どおりの版に解決され、
+  ビルドの後も lock が変わらないことを確かめた。版を上げる手順は `docs/workflow.md` §3.2。
