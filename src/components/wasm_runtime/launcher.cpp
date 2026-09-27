@@ -5,6 +5,7 @@
 #include "screensaver.hpp"
 #include "embedded_apps.h"
 #include "splash_logo.h"
+#include "launcher_theme.h"
 
 #include "sdcard.hpp"
 #include "audio.hpp"
@@ -125,17 +126,18 @@ void create_menu_locked()
 {
     // 画面はランドスケープ 320x240(display.cpp: hres=LCD_V_RES, swap_xy)
     s_menu_screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(s_menu_screen, lv_color_hex(0x101418), 0);
+    // 配色はスプラッシュのロゴに合わせる(shared/launcher_theme.h。Phase 22a 追記)
+    lv_obj_set_style_bg_color(s_menu_screen, lv_color_hex(MENU_BG_RGB888), 0);
 
     lv_obj_t* title = lv_label_create(s_menu_screen);
     lv_label_set_text(title, "Kybotos Menu");
-    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(MENU_TITLE_RGB888), 0);
     lv_obj_set_pos(title, 10, 8);
 
     s_list_cont = lv_obj_create(s_menu_screen);
     lv_obj_set_size(s_list_cont, 300, 164);
     lv_obj_set_pos(s_list_cont, 10, 32);
-    lv_obj_set_style_bg_color(s_list_cont, lv_color_hex(0x181e24), 0);
+    lv_obj_set_style_bg_opa(s_list_cont, LV_OPA_TRANSP, 0); // 行だけを背景に並べる
     lv_obj_set_style_border_width(s_list_cont, 0, 0);
     lv_obj_set_style_pad_all(s_list_cont, 6, 0);
     lv_obj_set_flex_flow(s_list_cont, LV_FLEX_FLOW_COLUMN);
@@ -143,7 +145,7 @@ void create_menu_locked()
 
     s_status_lbl = lv_label_create(s_menu_screen);
     lv_label_set_text(s_status_lbl, "");
-    lv_obj_set_style_text_color(s_status_lbl, lv_color_hex(0x90a0b0), 0);
+    lv_obj_set_style_text_color(s_status_lbl, lv_color_hex(MENU_STATUS_RGB888), 0);
     lv_obj_set_pos(s_status_lbl, 10, 204);
     lv_label_set_long_mode(s_status_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_status_lbl, 300);
@@ -153,6 +155,21 @@ void create_menu_locked()
     wasmrt::hostapi_masterui_attach_menu(s_menu_screen); // Phase 21b
 }
 
+// メニューの行のボタン(配色は shared/launcher_theme.h)。影は付けず、押している間は hi の色
+lv_obj_t* create_row_locked(uint32_t bg, uint32_t hi, uint32_t text_color, const char* text)
+{
+    lv_obj_t* row = lv_button_create(s_list_cont);
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_style_bg_color(row, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(hi), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(row, 0, 0);
+    lv_obj_t* label = lv_label_create(row);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, lv_color_hex(text_color), 0);
+    lv_obj_center(label);
+    return row;
+}
+
 // lvgl_port_lock 下で呼ぶこと。kAppsDir を読み直して行を作る。
 void rebuild_list_locked()
 {
@@ -160,12 +177,8 @@ void rebuild_list_locked()
 
     // **いちばん上に `Settings`**(アプリの一覧より前。Phase 21b)
     {
-        lv_obj_t* row = lv_button_create(s_list_cont);
-        lv_obj_set_width(row, lv_pct(100));
-        lv_obj_set_style_bg_color(row, lv_color_hex(0x305090), 0);
-        lv_obj_t* label = lv_label_create(row);
-        lv_label_set_text(label, "Settings");
-        lv_obj_center(label);
+        lv_obj_t* row = create_row_locked(MENU_SETTINGS_BG_RGB888, MENU_SETTINGS_HI_RGB888,
+                                          MENU_SETTINGS_TEXT_RGB888, "Settings");
         lv_obj_add_event_cb(row, settings_row_event_cb, LV_EVENT_CLICKED, nullptr);
     }
 
@@ -178,15 +191,11 @@ void rebuild_list_locked()
     while (dirent* ent = readdir(dir)) {
         if (!has_wasm_ext(ent->d_name)) continue;
 
-        lv_obj_t* row = lv_button_create(s_list_cont);
-        lv_obj_set_width(row, lv_pct(100));
-        lv_obj_set_style_bg_color(row, lv_color_hex(0x2a3340), 0);
         // 演奏者に WASM を意識させないので拡張子を出さない(Phase 22a)。起動時に付け直す
         char stem[64];
         snprintf(stem, sizeof(stem), "%.*s", (int)(strlen(ent->d_name) - 5), ent->d_name);
-        lv_obj_t* label = lv_label_create(row);
-        lv_label_set_text(label, stem);
-        lv_obj_center(label);
+        lv_obj_t* row = create_row_locked(MENU_APP_BG_RGB888, MENU_APP_HI_RGB888,
+                                          MENU_APP_TEXT_RGB888, stem);
         lv_obj_add_event_cb(row, row_event_cb, LV_EVENT_CLICKED, nullptr);
         count++;
     }

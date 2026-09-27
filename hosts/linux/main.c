@@ -30,6 +30,7 @@
 #include "hostapi_seq.h"
 #include "cmd_fifo.h"     /* Phase 22 */
 #include "splash_logo.h"  /* Phase 22a */
+#include "launcher_theme.h" /* Phase 22a 追記: メニューの配色(実機と共有) */
 
 #define APP_TICK_MS 100
 #define MAX_APPS 32
@@ -273,23 +274,23 @@ static void app_unload(App* a, bool clean_stop)
 
 static void menu_render(int hover)
 {
-    host_sdl_begin_frame(0x101418);
-    host_sdl_text(10, 10, "Kybotos Menu", 0xffffff); /* Phase 22a(旧 "WASM Apps (<dir>)") */
+    host_sdl_begin_frame(MENU_BG_RGB888);
+    host_sdl_text(10, 10, "Kybotos Menu", MENU_TITLE_RGB888); /* Phase 22a(旧 "WASM Apps (<dir>)") */
 
     /* いちばん上に `Settings`(Phase 21b)。上端スワイプが使えない場面の受け皿 */
     host_sdl_rect(MENU_ROW_X, MENU_ROW_Y0, MENU_ROW_W, MENU_ROW_H,
-                  (hover == MENU_SETTINGS_ROW) ? 0x4060a0 : 0x305090);
-    host_sdl_text(MENU_ROW_X + 8, MENU_ROW_Y0 + 2, "Settings", 0xffffff);
+                  (hover == MENU_SETTINGS_ROW) ? MENU_SETTINGS_HI_RGB888 : MENU_SETTINGS_BG_RGB888);
+    host_sdl_text(MENU_ROW_X + 8, MENU_ROW_Y0 + 2, "Settings", MENU_SETTINGS_TEXT_RGB888);
 
     for (int i = 0; i < s_app_count; i++) {
         const int y = MENU_ROW_Y0 + (i + 1) * (MENU_ROW_H + MENU_ROW_GAP);
         if (y + MENU_ROW_H > MENU_STATUS_Y) break; /* あふれは表示しない(PoC) */
         host_sdl_rect(MENU_ROW_X, y, MENU_ROW_W, MENU_ROW_H,
-                      (i == hover) ? 0x3a4a60 : 0x2a3340);
-        host_sdl_text(MENU_ROW_X + 8, y + 2, s_apps[i].name, 0xffffff);
+                      (i == hover) ? MENU_APP_HI_RGB888 : MENU_APP_BG_RGB888);
+        host_sdl_text(MENU_ROW_X + 8, y + 2, s_apps[i].name, MENU_APP_TEXT_RGB888);
     }
 
-    host_sdl_text(10, MENU_STATUS_Y, s_status, 0x90a0b0);
+    host_sdl_text(10, MENU_STATUS_Y, s_status, MENU_STATUS_RGB888);
     draw_master_overlay_if_open();
     host_sdl_present();
 }
