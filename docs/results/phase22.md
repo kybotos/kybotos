@@ -527,3 +527,5 @@ app-sequencer のビルドスクリプトに ON / OFF の指定(回帰用は ON�
 ユーザー判断で **`cam-rec.sh` に `CAM_AUDIO_SOURCE` を足し、既定を StreamCam のソース名にした**(workflow §3.3 に追記)。
 OFF のファームのまま録り直した `captures/phase22-step5b/cam_rec_155831.mp4` は**平均 −15.9 / 最大 0 dBFS**で、1 秒ごとの RMS は
 metronome の区間(3〜8 秒)−19〜−22 dBFS、無音の区間(9〜11 秒)−48〜−50、MP3 の区間(12〜18 秒)−5〜−22 dBFS。
+
+**ユーザーの確認(2026-09-27)**: 録り直した `cam_rec_155831.mp4` を ffplay で聴いて**問題無し**(metronome と MP3 の音)。これで音の最終確認も済んだ。
