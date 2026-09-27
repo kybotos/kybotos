@@ -426,3 +426,16 @@ W WASM/API: audio_play: failed: /sdcard/music/hcheck_missing.mp3
   「1 回目だけ減ってよい」を表せない。→ **ユーザー判断待ち**。
 - **`largest_int` が統合前の 102,400 から 98,304 に下がり、`MIN_LARGEST_INT`(98,304)ちょうど**。free_int は 150,312 → 150,304(−8 B)しか変わっていないので、
   **静的領域のわずかな増減でブロックの境界がずれた**(U-29 の版の違いのときと同じ種類)と見ている。判定は `≥` なので通る。→ **ユーザーに報告**。
+
+### ユーザーの判断(2026-09-27)と、その後
+
+- **一度きりの確保は、conf の書式を変えずに固定値で扱う**: `EXPECT_DELTA[mp3player]=-36` / `[hostapi_check]=-176`、
+  どちらも `REPEAT_OVERRIDE=1`(2 回目以降は +0 になり、同じ期待値を全回に当てられないため)。U-23 の記録には 36〜44 B と揺れた値があるので、
+  −36 以外で落ちたら、まず値が揺れたのか漏れが増えたのかを見る(conf のコメントに書いた)。
+- **`MIN_LARGEST_INT` は据え置き**(98,304 ちょうどで `≥` なので通る)。
+
+**実機(`captures/phase22-step4-device/report.md`)**: **PASS、45 秒**。metronome × 3 +0(反復一致)、mp3player −36、hostapi_check −176、シナリオすべて合格、許容外の警告 0 件。
+
+**外の conf の形で実機**(`captures/phase22-extconf-device/`): 上の 3 本 + midi_loopback × 3(シナリオ無し、+0、反復一致)で **PASS**。
+1 回目は midi_loopback の 3 回目で `free_psram` / `largest_psram` が空になり「反復で free_psram が変化」で落ちた。ログの行は完全だったので、
+**tee が書き途中の行にスクリプトが一致した**(`app: stopped free_int=` まで書かれた時点)。以前からあり得た競合で、**行末の `]` まで待つ**ように直した。

@@ -234,7 +234,8 @@ for app in $APPS; do
     # 4 値行(Phase 15)。1 行目の直後に必ず出る。
     #   app: stopped free_int=N largest_int=N free_psram=N largest_psram=N \
     #       [start free_int=N free_psram=N]
-    if ! statline=$(wait_line 'app: stopped free_int=' "$mark" 10); then
+    # 行末の ] まで待つ(tee が書き途中の行に一致すると、後半の値が空になる。Phase 22 で 1 回踏んだ)
+    if ! statline=$(wait_line 'app: stopped free_int=.*\]' "$mark" 10); then
         ROWS+=("| $app | - | - | - | - | - | - | - | FAIL(4 値行が出ない) |"); overall=1; continue
     fi
     # free_int / free_psram は行の前半と "[start ...]" の両方に出るので、先に切り分ける
