@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
+#include <atomic>
 
 #include "esp_log.h"
 #include "driver/gpio.h"
@@ -290,11 +291,44 @@ static inline void map_basic_to_display(uint16_t& x, uint16_t& y)
 }
 
 //-----------------------------------------------------------------------------
+// Phase 22: touch injection (serial console). LVGL task reads, console task writes
+//-----------------------------------------------------------------------------
+static std::atomic<bool>    s_inj_active{false};  // press から、release を一度読むまで
+static std::atomic<bool>    s_inj_pressed{false};
+static std::atomic<int32_t> s_inj_point{0};       // (x << 16) | (y & 0xffff)
+
+namespace touch_inject {
+void press(int16_t x, int16_t y)
+{
+    s_inj_point.store(((int32_t)x << 16) | (uint16_t)y);
+    s_inj_pressed.store(true);
+    s_inj_active.store(true);
+}
+
+void release()
+{
+    s_inj_pressed.store(false);
+}
+} // namespace touch_inject
+
+//-----------------------------------------------------------------------------
 // LVGL input read callback
 //-----------------------------------------------------------------------------
 static void indev_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
 {
     (void)indev;
+    if (s_inj_active.load()) {
+        const int32_t p = s_inj_point.load();
+        data->point.x = static_cast<lv_coord_t>((int16_t)(p >> 16));
+        data->point.y = static_cast<lv_coord_t>((int16_t)(p & 0xffff));
+        if (s_inj_pressed.load()) {
+            data->state = LV_INDEV_STATE_PRESSED;
+        } else {
+            data->state = LV_INDEV_STATE_RELEASED;  // 離した座標を LVGL に一度渡してから実タッチへ戻す
+            s_inj_active.store(false);
+        }
+        return;
+    }
     if (!s_dev) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;

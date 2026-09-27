@@ -252,3 +252,40 @@ Host API は 30 関数 + 任意 export 2 つ。抽出は `.wasm` の import / ex
 2. **回帰に使うファームは推奨どおり**: `src/build` を一度 `-DKYBOTOS_DEV_APPS=ON` で構成して使う。CI と README は OFF。
 3. **workflow §1-8 は e の案の文面でよい。**
 4. **U-18 と U-11 はこのフェーズで片付ける。**
+
+## 統合前の基準(2026-09-27)
+
+ステップ 1 より前のコード(`3bea232` と同じ。間のコミットは文書だけ)でファームをビルド・フラッシュし、回帰を 1 回ずつ回した。
+所要時間は**スクリプトの開始から終了までの壁時計**(実機はボードのリセットとモニタの起動を含む)。
+
+| 回帰 | 所要時間 | 結果 | 備考 |
+|---|---|---|---|
+| 実機 `device-regress.sh` | **147 秒** | PASS(5 本、4 本 × 3 回 + seq_smoke 1 回、差分すべて +0、警告 0) | 停止時 free_int 150,312 / largest_int 102,400 / free_psram 8,136,668 |
+| Linux `linux-regress.sh` | **27 秒** | PASS(5 本 × 1 回、各 5 秒保持) | highmark: touch_demo 15,944 / mp3player 19,112 / metronome 22,952 / midi_loopback 29,120 / seq_smoke 28,968 |
+
+**Linux の 27 秒は seq_smoke の自己検査を最後まで待っていない**(5 秒で止める)ので、統合後と同じ条件の比較にはならない。
+統合後の Linux は hostapi_check の完了を待つぶん長くなりうる(ステップ 5 で両方を並べて評価する)。
+
+## ステップ 1: 実機のタップ注入と `texts`(2026-09-27)
+
+### 実装
+
+| ファイル | 変更 |
+|---|---|
+| `src/components/touch/touch.hpp` / `touch.cpp` | `touch_inject::press(x, y)` / `release()`。**`indev_read_cb` の先頭で、注入中なら実タッチを読まずに注入した点を返す**。状態は atomic 3 つ(注入中 / 押下中 / 座標)。release は「LVGL が RELEASED を一度読んだら注入を終える」 |
+| `src/components/wasm_runtime/hostapi.hpp` / `hostapi.cpp` | `hostapi_dump_texts(emit)`: LVGL のロック下で文字スロットを列挙(アプリ画面が無ければ -1) |
+| `src/main/serial_cmd.cpp` | `tap X Y`(80ms)/ `hold X Y MS` / `drag X Y DX DY MS`(8 段 × 40ms)/ `key back\|home` / `texts` / `rm <app>`。押す時間はコンソールのタスクが `vTaskDelay` で刻み、**終わってから応答する** |
+| `src/main/Kconfig.projbuild` | `KYBOTOS_SERIAL_CMD` の help にコマンドを追記 |
+
+### 確認(`captures/phase22-step1/monitor.log`)
+
+- **座標**: metronome の START(`BTN_XS[3]` = 246 + 35, `BTN_Y` = 176 + 26 → `tap 281 202`)で `START` → `STOP ` → `START`、
+  BPM+(`tap 125 202`)で `BPM: 120` → `BPM: 125`。**表示の回転はパネル側(`swap_xy` / `mirror_x`)で行っていて LVGL の回転は 0**
+  なので、**注入した論理座標がそのままアプリの座標になる**(厳密な一致はステップ 3 の hostapi_check で確かめる)。
+- **`texts`**: `text <x> <y> <rrggbb> <文字>` × 8 行 + `texts done 8`。アプリが無いときは `texts idle`。
+- **masterui の関所を通る**: `drag 160 0 0 80 0`(上端から下へ 80px)で **Settings の帯が開いた**(カメラの静止画
+  `captures/phase22-step1/cam_still_143905.png`)。× を `tap 300 18` で閉じたあと、START のタップがアプリに届いた。
+- **`key back`**: `KBCMD: key ok back` → `app: key back -> stop` → 停止、**free_int 差分 +0**。アプリが無いときは `key idle`。
+- **`rm`**: `rm ../x` → `rm err bad name`、`rm nosuch` → `rm err no such app ...`、`rm synth_probe` → `rm ok`(`ls` が 7 → 6 本、
+  `run synth_probe` → `no such app`)。synth_probe は今のファームに埋め込まれているので次の起動でまた置かれる。
+- **警告**: 起動直後の I2C の nack 以外に W / E 行なし。

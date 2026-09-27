@@ -17,7 +17,10 @@ menu "Kybotos"
             with log lines tagged KBCMD. Used by scripts/device-regress.sh to
             run the on-device regression without touching the screen:
             ping / ls / run <app> / stop / heap.
-            The touch and power-key paths are unaffected.
+            Phase 22 adds UI injection for scripted regressions
+            (tap / hold / drag / key back|home), a dump of the app's text
+            slots (texts) and rm <app> to delete an app from the SD card.
+            Real touches and the power key keep working as before.
 
 
     config KYBOTOS_SD_SKIP_SDMMC_PROBE

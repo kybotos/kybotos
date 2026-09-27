@@ -891,6 +891,23 @@ void hostapi_app_screen_destroy()
     event_queue_reset();
 }
 
+int hostapi_dump_texts(TextEmitFn emit)
+{
+    lvgl_port_lock(0);
+    if (!s_screen) {
+        lvgl_port_unlock();
+        return -1;
+    }
+    int n = 0;
+    for (const auto& t : s_texts) {
+        if (!t.label) continue;
+        emit(t.x, t.y, t.rgb, lv_label_get_text(t.label));
+        n++;
+    }
+    lvgl_port_unlock();
+    return n;
+}
+
 void hostapi_audio_reset()
 {
     // ライフサイクル契約: アプリ破棄時にオーディオを必ず停止する。

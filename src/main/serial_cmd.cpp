@@ -33,12 +33,16 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 
+#include "hostapi.hpp"
 #include "launcher.hpp"
+#include "touch.hpp"
 #include "wasm_runtime.hpp"
 
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <dirent.h>
+#include <unistd.h>
 
 namespace {
 
@@ -112,6 +116,122 @@ void cmd_stop()
     ESP_LOGI(TAG, "stop ok");
 }
 
+// ---- Phase 22: UI の注入と画面の文字 ------------------------------------------
+//
+// 回帰のシナリオ(scripts/regress-scenario.sh)が使う。座標はアプリの論理座標(320x240)。
+// 注入は touch の indev_read_cb の段で行うので、指と同じ経路を通る(touch.hpp)。
+// 押している時間はこのタスクが vTaskDelay で刻み、終わってから応答する
+// (シナリオは応答を待って次の手順へ進むだけでよい)。
+
+constexpr int kTapMs = 80;        // LVGL の読み取り周期(既定 30ms)の数回ぶん
+constexpr int kDragSteps = 8;     // scripts/ui-linux.sh の drag と同じ形
+constexpr int kDragStepMs = 40;
+
+// 空白区切りの整数を n 個読む。足りなければ false
+bool parse_ints(const char* arg, int* out, int n)
+{
+    const char* p = arg ? arg : "";
+    for (int i = 0; i < n; i++) {
+        char* end = nullptr;
+        const long v = strtol(p, &end, 10);
+        if (end == p) return false;
+        out[i] = (int)v;
+        p = end;
+    }
+    return true;
+}
+
+void cmd_tap(const char* arg)
+{
+    int v[2];
+    if (!parse_ints(arg, v, 2)) { ESP_LOGI(TAG, "tap err usage: tap X Y"); return; }
+    touch_inject::press((int16_t)v[0], (int16_t)v[1]);
+    vTaskDelay(pdMS_TO_TICKS(kTapMs));
+    touch_inject::release();
+    vTaskDelay(pdMS_TO_TICKS(kTapMs));
+    ESP_LOGI(TAG, "tap done %d %d", v[0], v[1]);
+}
+
+void cmd_hold(const char* arg)
+{
+    int v[3];
+    if (!parse_ints(arg, v, 3) || v[2] < 0) { ESP_LOGI(TAG, "hold err usage: hold X Y MS"); return; }
+    touch_inject::press((int16_t)v[0], (int16_t)v[1]);
+    vTaskDelay(pdMS_TO_TICKS(v[2] > kTapMs ? v[2] : kTapMs));
+    touch_inject::release();
+    vTaskDelay(pdMS_TO_TICKS(kTapMs));
+    ESP_LOGI(TAG, "hold done %d %d %d", v[0], v[1], v[2]);
+}
+
+void cmd_drag(const char* arg)
+{
+    int v[5];
+    if (!parse_ints(arg, v, 5) || v[4] < 0) {
+        ESP_LOGI(TAG, "drag err usage: drag X Y DX DY MS");
+        return;
+    }
+    touch_inject::press((int16_t)v[0], (int16_t)v[1]);
+    vTaskDelay(pdMS_TO_TICKS(v[4] > kTapMs ? v[4] : kTapMs));
+    for (int k = 1; k <= kDragSteps; k++) {
+        touch_inject::press((int16_t)(v[0] + v[2] * k / kDragSteps),
+                            (int16_t)(v[1] + v[3] * k / kDragSteps));
+        vTaskDelay(pdMS_TO_TICKS(kDragStepMs));
+    }
+    touch_inject::release();
+    vTaskDelay(pdMS_TO_TICKS(kTapMs));
+    ESP_LOGI(TAG, "drag done %d %d %d %d %d", v[0], v[1], v[2], v[3], v[4]);
+}
+
+// 電源キーと同じ入口(短押し = 戻る、長押し = 強制ホーム)
+void cmd_key(const char* arg)
+{
+    const bool back = arg && strcmp(arg, "back") == 0;
+    const bool home = arg && strcmp(arg, "home") == 0;
+    if (!back && !home) { ESP_LOGI(TAG, "key err usage: key back|home"); return; }
+    if (!wasmrt::app_is_running()) { ESP_LOGI(TAG, "key idle"); return; }
+    if (back) wasmrt::app_request_key_back();
+    else      wasmrt::app_request_force_home();
+    ESP_LOGI(TAG, "key ok %s", arg);
+}
+
+// 1 スロット = 1 行。非 ASCII と '\' は \xNN にしてログを ASCII に保つ
+void emit_text(int32_t x, int32_t y, uint32_t rgb, const char* text)
+{
+    char esc[4 * 64 + 1];
+    size_t o = 0;
+    for (const unsigned char* p = (const unsigned char*)text; *p && o + 4 < sizeof(esc); p++) {
+        if (*p >= 0x20 && *p < 0x7f && *p != '\\') {
+            esc[o++] = (char)*p;
+        } else {
+            o += snprintf(esc + o, sizeof(esc) - o, "\\x%02x", *p);
+        }
+    }
+    esc[o] = 0;
+    ESP_LOGI(TAG, "text %d %d %06x %s", (int)x, (int)y, (unsigned)(rgb & 0xffffff), esc);
+}
+
+void cmd_texts()
+{
+    const int n = wasmrt::hostapi_dump_texts(emit_text);
+    if (n < 0) ESP_LOGI(TAG, "texts idle");
+    else       ESP_LOGI(TAG, "texts done %d", n);
+}
+
+// SD のアプリを消す(埋め込みから外したアプリの .wasm は SD に残るため。Phase 22)
+void cmd_rm(const char* name)
+{
+    if (!name || !*name) { ESP_LOGI(TAG, "rm err usage: rm <app>"); return; }
+    if (strchr(name, '/') || strstr(name, "..")) { ESP_LOGI(TAG, "rm err bad name"); return; }
+    if (wasmrt::app_is_running()) { ESP_LOGI(TAG, "rm err app is running"); return; }
+    char path[96];
+    const size_t len = strlen(name);
+    const bool ext = len > 5 && strcasecmp(name + len - 5, ".wasm") == 0;
+    snprintf(path, sizeof(path), ext ? "%s/%s" : "%s/%s.wasm", wasmrt::kAppsDir, name);
+    if (unlink(path) != 0) { ESP_LOGI(TAG, "rm err no such app %s", path); return; }
+    wasmrt::launcher_show(nullptr);  // メニューの一覧を読み直す
+    ESP_LOGI(TAG, "rm ok %s", path);
+}
+
 void dispatch(char* line)
 {
     // 前後の空白を落とす
@@ -132,6 +252,12 @@ void dispatch(char* line)
     else if (strcmp(line, "ls") == 0)   cmd_ls();
     else if (strcmp(line, "stop") == 0) cmd_stop();
     else if (strcmp(line, "run") == 0)  cmd_run(arg ? arg : "");
+    else if (strcmp(line, "tap") == 0)  cmd_tap(arg);
+    else if (strcmp(line, "hold") == 0) cmd_hold(arg);
+    else if (strcmp(line, "drag") == 0) cmd_drag(arg);
+    else if (strcmp(line, "key") == 0)  cmd_key(arg);
+    else if (strcmp(line, "texts") == 0) cmd_texts();
+    else if (strcmp(line, "rm") == 0)   cmd_rm(arg);
     else ESP_LOGI(TAG, "err unknown command '%s'", line);
 }
 
