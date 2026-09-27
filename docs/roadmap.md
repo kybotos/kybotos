@@ -31,7 +31,7 @@ Host API・ホスト・ランタイム・SDK・検証基盤のフェーズ。**S
 | Phase | 目的 | 状態 | 完了条件の要点 | 依存 |
 |---|---|---|---|---|
 | **22** | **回帰アプリの統合と、タップの自動化** | **done**(2026-09-27) | **回帰を metronome / mp3player + 検査アプリ `hostapi_check`(`wasm-apps/dev/`)の 3 本に**(touch_demo 削除、seq_smoke を吸収、midi_loopback / synth_probe を `wasm-apps/dev/` へ)。**既定のファームは実用アプリだけ**(`KYBOTOS_DEV_APPS=ON` で検査用・診断用を埋め込む)。**実機はシリアルコンソール(`tap` / `hold` / `drag` / `key` / `texts` / `rm`)、Linux は `KYBOTOS_CMD_FIFO` から注入**し、画面の文字で判定(シナリオ `SCENARIO[<app>]`、`scripts/regress-scenario.sh`)。**実機の回帰 147 → 45 秒**、Linux は xdotool 不要に。**Host API / ABI 不変**、metronome / mp3player の highmark 不変。workflow §1-8 を改訂(ユーザー承認)。`docs/results/phase22.md` | 21f |
-| **22a** | **起動からメニュー表示までの UI の改善** | **done**(2026-09-27) | **演奏者・作曲者に WASM を意識させない**。起動時にロゴ(`docs/images/kybotos.png`)のスプラッシュを最短 1.5 秒、メニューの題名を `Kybotos Menu` に、アプリ名から `.wasm` を取った(実機・Linux)。ロゴは RGB565 の配列を `shared/` で共有(flash +115KB)。**Host API / ABI 不変**、回帰 3 本 PASS、開始時の free_int −40 B(一度きり)。`docs/results/phase22a.md` | 22 |
+| **22a** | **起動からメニュー表示までの UI の改善** | **done**(2026-09-27) | **演奏者・作曲者に WASM を意識させない**。起動時にロゴ(`docs/images/kybotos.png`)のスプラッシュを最短 1.5 秒、メニューの題名を `Kybotos Menu` に、アプリ名から `.wasm` を取った(実機・Linux)。**メニューの背景もスプラッシュと同じ濃い緑に**(配色は `shared/launcher_theme.h`)。ロゴは RGB565 の配列を `shared/` で共有(flash +115KB)。**Host API / ABI 不変**、回帰 3 本 PASS、開始時の free_int −40 B(一度きり)。`docs/results/phase22a.md` | 22 |
 | 23〜 | 候補: **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27) | deferred | — | 22 |
 
 ### Sequencer App(2026-09-27 に終了)
