@@ -31,6 +31,7 @@ Host API・ホスト・ランタイム・SDK・検証基盤のフェーズ。**S
 | Phase | 目的 | 状態 | 完了条件の要点 | 依存 |
 |---|---|---|---|---|
 | **22** | **回帰アプリの統合と、タップの自動化** | **done**(2026-09-27) | **回帰を metronome / mp3player + 検査アプリ `hostapi_check`(`wasm-apps/dev/`)の 3 本に**(touch_demo 削除、seq_smoke を吸収、midi_loopback / synth_probe を `wasm-apps/dev/` へ)。**既定のファームは実用アプリだけ**(`KYBOTOS_DEV_APPS=ON` で検査用・診断用を埋め込む)。**実機はシリアルコンソール(`tap` / `hold` / `drag` / `key` / `texts` / `rm`)、Linux は `KYBOTOS_CMD_FIFO` から注入**し、画面の文字で判定(シナリオ `SCENARIO[<app>]`、`scripts/regress-scenario.sh`)。**実機の回帰 147 → 45 秒**、Linux は xdotool 不要に。**Host API / ABI 不変**、metronome / mp3player の highmark 不変。workflow §1-8 を改訂(ユーザー承認)。`docs/results/phase22.md` | 21f |
+| **22a** | **起動からメニュー表示までの UI の改善** | **done**(2026-09-27) | **演奏者・作曲者に WASM を意識させない**。起動時にロゴ(`docs/images/kybotos.png`)のスプラッシュを最短 1.5 秒、メニューの題名を `Kybotos Menu` に、アプリ名から `.wasm` を取った(実機・Linux)。ロゴは RGB565 の配列を `shared/` で共有(flash +115KB)。**Host API / ABI 不変**、回帰 3 本 PASS、開始時の free_int −40 B(一度きり)。`docs/results/phase22a.md` | 22 |
 | 23〜 | 候補: **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27) | deferred | — | 22 |
 
 ### Sequencer App(2026-09-27 に終了)
@@ -82,6 +83,7 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 
 | 日付 | 変更 |
 |---|---|
+| 2026-09-27 | **Phase 22a(起動からメニュー表示までの UI の改善)を追加し、完了した**(`docs/prompts/phase22a.md` / `docs/results/phase22a.md`)。ユーザーの指示: 使うのは演奏者・作曲者なので UI で WASM を意識させない(スプラッシュ、`Kybotos Menu`、拡張子を出さない) |
 | 2026-09-27 | **Phase 22 完了**(`docs/results/phase22.md`)。回帰を 3 本(metronome / mp3player / hostapi_check)にし、タップと画面の文字の確認まで自動化した(実機 147 → 45 秒)。**U-11 / U-18 をクローズ**、**U-23 は一度きりの確保と判明**、**U-30(初回の書き込み用 fopen で −176 B)と U-31(検査用アプリが SD に残る)を追加**。ユーザー判断: SD の古いアプリは `rm` で手で消す、回帰に使うファームは `src/build` を `KYBOTOS_DEV_APPS=ON` で構成、一度きりの確保は conf の書式を変えずに固定値、`MIN_LARGEST_INT` は据え置き(98,304 ちょうど) |
 | 2026-09-27 | **Sequencer トラックを終了し、Platform トラックに切り替えた**(ユーザー判断。Sequencer とは独立に進める)。**Phase 22(回帰アプリの統合と、タップの自動化)の指示書を作成した**(`docs/prompts/phase22.md`)。ユーザーの決定: (a) 回帰は**実用アプリ(metronome / mp3player)の起動と操作 + Host API をある程度網羅する検査アプリ**、目的は**回帰時間の短縮と実機で実用アプリを目立たせること**、(b) 検査用・診断用アプリは**既定のファームに埋め込まない**(ランチャーに出さない印を付ける方式は採らない)、(c) **touch_demo は削除**、(d) **Linux もタップを自動化する**(workflow §1-8 の見直し。文面はステップ 0 で承認)。旧「22〜」の候補(U-22 の対策、U-26、U-27)は 23〜 へ |
 | 2026-09-26 | **旧名 MidiAppBox を Kybotos に改名した**(`kybotos_host`、`KYBOTOS_*`、`CONFIG_KYBOTOS_*`、`kybotos.bin`、`KBCMD`、コンテナの `/workspaces/kybotos`。`docs/results/publish-prep.md` の追記)。記録と履歴は旧名のまま |

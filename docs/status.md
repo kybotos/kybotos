@@ -887,3 +887,7 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     停止時 `free_int` 150,304 / `largest_int` 98,304(`MIN_LARGEST_INT` ちょうど。据え置き)/ `free_psram` 8,136,668。
     mp3player の 1 回目 −36 B(U-23)と hostapi_check の −176 B(U-30)は、起動後の初回だけの確保(リークではない)。
   - 実機は既定(OFF)のファームで残してある。
+- **Phase 22a(起動からメニュー表示までの UI の改善)完了。** 詳細は `docs/results/phase22a.md`。
+  - 起動時にロゴ(`docs/images/kybotos.png`)を最短 1.5 秒出し、メニューの題名を `Kybotos Menu` に、アプリ名から `.wasm` を取った(実機・Linux)。
+  - 確認: 実機・Linux の回帰 PASS、Host API / ABI 不変。開始時の `free_int` 150,264(Phase 22 から −40 B、起動時の一度きり)。
+  - 実機は既定(OFF)のファームで残してある。

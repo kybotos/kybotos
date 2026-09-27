@@ -1,0 +1,52 @@
+# Phase 22a: 起動からメニュー表示までの UI の改善
+
+- 契約日: 2026-09-27
+- 参照: `docs/results/phase22.md`(直前のフェーズ)、`src/main/app_main.cpp`(起動の順序)、
+  `src/components/wasm_runtime/launcher.cpp`(メニュー画面)、`hosts/linux/main.c`(Linux のメニュー)、
+  `hosts/linux/hostapi_sdl.c`(描画)、`docs/images/kybotos.png`(ロゴ)、`docs/workflow.md` §3.4 / §3.6 / §3.7
+- 結果報告先: `docs/results/phase22a.md`
+
+## 目的
+
+**使うのはソフトウェアの設計者ではなく演奏者・作曲者なので、起動からメニューまでの UI で WASM を意識させない。**
+
+1. **起動時に `docs/images/kybotos.png` をスプラッシュとして表示する**(実機・Linux)。
+2. **メニューの題名を `WASM Apps (/sdcard/apps)` から `Kybotos Menu` にする**(Linux の `WASM Apps (<dir>)` も同じ)。
+3. **メニューの行からアプリの拡張子 `.wasm` を取る**(`metronome.wasm` → `metronome`)。
+   メニューの状態行の文言(`no .wasm files in /sdcard/apps` 等)も WASM に触れない言い方にする。
+
+## 決定済みのスコープ(2026-09-27 のユーザー指示)
+
+- 上の 3 点。**UI では WASM を意識させない表示にする。**
+
+## 前提(着手時にソースで確認済み)
+
+- **P1: 起動の順序(実機)。** `app_main` は `disp.start_lvgl()` の後に audio / MIDI / seq / WAMR を初期化し、
+  `wasm_boot` タスクで 500ms 待ってから SD の準備(埋め込みアプリの `seed_file`)→ `serialcmd::Init` →
+  `launcher_show` の順。**それまで画面は空**。
+- **P2: LVGL は RGB565**(`CONFIG_LV_COLOR_DEPTH_16`)。PNG デコーダーは無効(`LV_USE_LODEPNG` なし)、
+  画像キャッシュ 0。**RGB565 の C 配列を flash に置けば、デコードも heap の確保も要らない。**
+- **P3: flash の空き。** factory は 4MB、ファームは約 1.06MB。
+- **P4: Linux の描画**は論理座標 320×240(`SDL_RenderSetLogicalSize`、ウィンドウは ×2)。画像を貼る関数は無い。
+- **P5: 回帰はメニューを通らない。** 実機はシリアルの `run <app>`(拡張子なしで受ける)、Linux は単発実行。
+  シナリオの `texts` はアプリ画面の文字だけを見る。**メニューの表記を変えても回帰の手順は変わらない**。
+  ただし実機の回帰は `KBCMD: ready` を待つので、スプラッシュの時間だけ起動が遅れる。
+- **P6: ロゴ**は 1024×1024 の RGB、背景は単色 `#1f3d2e`。
+
+## 方針
+
+- **ロゴは RGB565 の C 配列にして `shared/` に置き、両ホストで共有する**(実機は `lv_image_dsc_t`、Linux は SDL のテクスチャ)。
+  変換は `scripts/gen_splash_logo.py`(Pillow)で行い、**生成物をコミットする**(ビルドに Python の依存を足さない)。
+- 画面は 320×240 なので、**ロゴを 240×240 に縮めて中央に置き、左右を背景色で塗る**。
+- **表示時間は最短 1.5 秒**。実機は SD の準備と重ねる(準備が 1.5 秒より長ければ、その分だけ長く出る)。
+- **Linux はメニューを出すとき(ランチャーのモード)だけ表示する**。単発実行(回帰・CI)では出さない。
+- メニューの行はファイル名から `.wasm` を取った名前を出し、起動のときに `.wasm` を付け直す。
+- シリアルコンソールの `ls` / `run` / `rm` と、ログの文言は開発者向けなのでそのまま。
+
+## 完了条件
+
+1. 実機・Linux で、起動するとロゴが出て、その後に `Kybotos Menu` と拡張子なしのアプリ名が並ぶ(静止画で確認)。
+2. メニューからのタップ起動が今までどおり動く(実機はシリアルの `tap` をメニュー画面に注入して確かめる)。
+3. **回帰(実機・Linux、3 本)が PASS**。heap の値(開始時・終了時・largest)の変化を記録する(スプラッシュを消した後に戻っていること)。
+4. ファームのサイズの増分を記録する。
+5. **Host API / ABI は変えない。** `.wasm` は再ビルドしない。
