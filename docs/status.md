@@ -890,5 +890,6 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
 - **Phase 22a(起動からメニュー表示までの UI の改善)完了。** 詳細は `docs/results/phase22a.md`。
   - 起動時にロゴ(`docs/images/kybotos.png`)を最短 1.5 秒出し、メニューの題名を `Kybotos Menu` に、アプリ名から `.wasm` を取った(実機・Linux)。
   - メニューの配色をロゴに合わせた(背景はスプラッシュと同じ濃い緑)。
+  - スプラッシュの表示時に起動音(`docs/sounds/kybotos.mp4`)を鳴らす(元の音の 50% × マスター音量)。
   - 確認: 実機・Linux の回帰 PASS、Host API / ABI 不変。開始時の `free_int` 150,264(Phase 22 から −40 B、起動時の一度きり)。
   - 実機は既定(OFF)のファームで残してある。

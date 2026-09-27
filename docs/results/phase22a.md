@@ -97,3 +97,31 @@ SD の検査用・診断用アプリをシリアルの `rm` で消した。メ�
 - **カメラでは明るい画面・緑の色味を判定できない。** `cam-still.sh` / `cam-rec.sh` の露出は暗い画面に合わせた固定値で、
   薄い緑の案は白飛びし、濃い緑は水色に写った。色の判定は Linux の画面の撮影(同じ RGB 値)と人間の目で行った。
 - 実機は既定(OFF)のファームに戻し、SD の検査用・診断用アプリを `rm` で消した。
+
+## 追記 (2026-09-27): 起動音
+
+指示書の「追記 (2026-09-27): 起動音」。**スプラッシュを出した直後に `docs/sounds/kybotos.mp4`(AAC、16kHz モノラル、0.64 秒、
+最大 −5.6 dBFS)を 1 回鳴らす**(実機・Linux)。
+
+| ファイル | 変更 |
+|---|---|
+| `scripts/gen_boot_sound.py`(新規) | ffmpeg で 44.1kHz モノラルの int16 に変換し、レベル(既定 50%)を掛けて `shared/boot_sound.c` / `.h` を書き出す |
+| `shared/boot_sound.c` / `.h`(新規、生成物) | 28,224 フレーム(640ms、56,448 B) |
+| `src/components/audio/audio.cpp` / `.hpp` / `CMakeLists.txt` | ミキサに**ボイスとは別枠で PCM を 1 本鳴らす経路**(`Play_Boot_Sound()`)。要求は atomic のフラグだけで、ミキサタスクが次のブロックの頭から鳴らす。音量はマスター音量だけ(開始時に固定。チャネル別の音量は掛けない)。MP3 に切り替わるときは止める(`flush_silence`)。C のファイルを足したので `-std=gnu++17` を C++ だけに限った(C に掛かって警告が出た) |
+| `src/main/app_main.cpp` | `Audio_Init` の直後(スプラッシュを出した後)に `Play_Boot_Sound()` |
+| `src/components/wasm_runtime/launcher.cpp` | スプラッシュをその場で描き切ってから戻る(`lv_refr_now`)。**ロゴが必ず音より先に出る**ように |
+| `hosts/linux/hostapi_sdl.c` / `.h` / `main.c` / `CMakeLists.txt` | 同じ経路(`host_sdl_play_boot_sound()`)。スプラッシュを出した直後に鳴らす |
+| `scripts/linux-launcher-shots.sh` | ミキサの出力を `boot.wav` に録り、鳴った区間とピークを出す |
+
+- **音量**: 最初は元の音のまま(× マスター 50 で最大 −11.6 dBFS)にしたが、ユーザーの試聴で大きいとのことで**元の音の 50%**
+  (× マスター 50 で最大約 −17.6 dBFS)にした。ユーザーの試聴で OK。
+- **Linux**(`captures/phase22a-sound2-linux/boot.wav`): 起動 0.07〜0.61 秒に鳴り、ピーク 4,315(= 17,260 × 50% × 50%)。
+- **回帰**(レベル 100% のとき): 実機 PASS(`captures/phase22a-sound-device/report.md`。開始時 free_int 150,264、差分は変更前と同じ)、
+  Linux PASS(highmark 22,952 / 19,112 / 34,728)。**50% にしたあとは回さなかった**(ユーザー判断。配列の値だけの変更)。
+  ファームは +56,704 B(1,177,328 → 1,234,032 B、`KYBOTOS_DEV_APPS=ON`。ほぼ音の配列の 56,448 B)。
+- **実機の音はカメラのマイクで確かめた**(`captures/phase22a-sound-boot2/`。約 0.5 秒、−7〜−14 dBFS のまとまった音)。
+  映像では**音がロゴより約 0.2 秒早く始まって見えた**。ロゴを描き切ってから進めるようにしても(`lv_refr_now`)ログの時刻も映像の見え方も
+  変わらず、2 回とも音の立ち上がりは**ディスプレイの初期化で出る白い画面と同時**だった。白い画面はロゴより約 130ms 前
+  (ログで `Display initialized` 1,202ms → タッチの初期化 1,332ms → 音 1,372ms)なので、**カメラの音声と映像のずれ**と判断した。
+  実機ではロゴの後に音が鳴る(`lv_refr_now` は順序を保証するために残した)。
+- 実機は既定(OFF)のファームで残し、SD の検査用・診断用アプリは `rm` で消した。
