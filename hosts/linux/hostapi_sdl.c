@@ -1256,6 +1256,17 @@ void host_sdl_render(void)
     SDL_RenderPresent(s_renderer);
 }
 
+int host_sdl_dump_texts(host_text_emit_fn emit)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_TEXT_SLOTS; ++i) {
+        if (!s_texts[i].used) continue;
+        emit(s_texts[i].x, s_texts[i].y, s_texts[i].rgb888, s_texts[i].text);
+        n++;
+    }
+    return n;
+}
+
 /* ---- natives (wasm import "env") ---- */
 
 /* Phase 18b: draw_text / draw_text_rgb の共通実装。**同じ (x,y) は同じスロット**

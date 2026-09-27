@@ -289,3 +289,27 @@ Host API は 30 関数 + 任意 export 2 つ。抽出は `.wasm` の import / ex
 - **`rm`**: `rm ../x` → `rm err bad name`、`rm nosuch` → `rm err no such app ...`、`rm synth_probe` → `rm ok`(`ls` が 7 → 6 本、
   `run synth_probe` → `no such app`)。synth_probe は今のファームに埋め込まれているので次の起動でまた置かれる。
 - **警告**: 起動直後の I2C の nack 以外に W / E 行なし。
+
+## ステップ 2: Linux のコマンドの入口(2026-09-27)
+
+### 実装
+
+| ファイル | 変更 |
+|---|---|
+| `hosts/linux/cmd_fifo.h` / `cmd_fifo.c`(新規) | `KYBOTOS_CMD_FIFO=<path>` があれば FIFO を `O_NONBLOCK` で開き、main ループの 1 周ごとに行を読む。語彙は実機と同じ(`ping` / `tap` / `hold` / `drag` / `key back` / `texts`)+ **`stop`**。応答は stdout の `CMD: ...`。**入口を使うときは stdout を行バッファにする**(`app started` などもすぐログファイルに出る)。`tap` / `hold` / `drag` は**段の予定表**(時刻・種類・座標)を積み、ループの 1 周ごとに期限の来た段を実行する(ループを止めない)。終わるまで次の行は読まない |
+| `hosts/linux/hostapi_sdl.h` / `hostapi_sdl.c` | `host_sdl_dump_texts(emit)` |
+| `hosts/linux/main.c` | 起動時に `cmd_fifo_open()`、ループで `cmd_fifo_poll()`(`KEY_BACK` → `key_back_req`、`STOP` → ESC と同じ停止)、終了時に `cmd_fifo_close()` |
+| `hosts/linux/CMakeLists.txt` | `cmd_fifo.c` を追加 |
+
+- **注入先は `host_sdl_push_touch` / `host_sdl_push_touch_move`**(マウスと同じ入口。masterui の関所も通る)。SDL のイベントは作らない。
+- **Linux のループは 100ms 周期**(`APP_TICK_MS`)なので、段の時刻の分解能も 100ms になる(80ms の `tap` は次の周で離す)。
+  アプリはキューで受けるので、DOWN と UP が同じ `app_tick` で届いても判定は変わらない。
+- **メニュー画面(アプリが動いていない)では、注入系は `idle` を返す**(Linux の回帰は単発実行なので要らない。実機はメニューにも効く)。
+
+### 確認(`captures/phase22-step2/`)
+
+ステップ 1 と同じ手順を FIFO から流し、**実機と同じ結果**になった:
+`texts` の 8 行が実機と**1 文字も違わず一致**、`tap 281 202` で `START` ↔ `STOP`、`tap 125 202` で `BPM: 125`、
+`drag 160 0 0 80 0` で **Settings が開いた**(`screen_still_144158.png`)、× で閉じて START のタップがアプリに届く、
+`key back` → `key back -> stop` → `app stopped`、`stop` → `app stopped`、プロセスの残留なし、警告 0。
+**FIFO を指定しなければ従来どおり**(`cmd fifo` の行も `CMD:` の行も出ない)。

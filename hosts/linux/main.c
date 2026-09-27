@@ -28,6 +28,7 @@
 #include "master_ui.h"   /* Phase 21b */
 #include "hostapi_midi.h"
 #include "hostapi_seq.h"
+#include "cmd_fifo.h"     /* Phase 22 */
 
 #define APP_TICK_MS 100
 #define MAX_APPS 32
@@ -340,6 +341,8 @@ int main(int argc, char** argv)
         goto out;
     }
 
+    cmd_fifo_open(); /* Phase 22: KYBOTOS_CMD_FIFO があればコマンドの入口を開く */
+
     {
         App app;
         bool app_running = false;
@@ -425,6 +428,24 @@ int main(int argc, char** argv)
                     }
                 }
             }
+            /* Phase 22: コマンドの入口(タッチの注入はこの中で行う)。キーと停止は下と ESC の処理に合わせる */
+            switch (cmd_fifo_poll(app_running)) {
+            case CMD_ACTION_KEY_BACK:
+                key_back_req = true;
+                break;
+            case CMD_ACTION_STOP: /* ESC と同じ = アプリに聞かずに止める */
+                app_unload(&app, true);
+                app_running = false;
+                if (single_mode) {
+                    quit = true;
+                } else {
+                    scan_apps(s_apps_dir);
+                    snprintf(s_status, sizeof(s_status), "app stopped");
+                }
+                break;
+            default:
+                break;
+            }
             if (quit) break;
 
             if (app_running) {
@@ -487,6 +508,7 @@ out:
     wasm_runtime_destroy();
     host_seq_shutdown();
     host_midi_shutdown();
+    cmd_fifo_close();
     host_sdl_shutdown();
     return ret;
 }

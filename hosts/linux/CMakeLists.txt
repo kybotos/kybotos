@@ -69,7 +69,7 @@ if(NOT ALSA_FOUND)
 endif()
 
 # ---- host executable ----
-add_executable(kybotos_host main.c hostapi_sdl.c hostapi_midi.c hostapi_seq.c
+add_executable(kybotos_host main.c cmd_fifo.c hostapi_sdl.c hostapi_midi.c hostapi_seq.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/seq_core.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c)
 target_include_directories(kybotos_host PRIVATE

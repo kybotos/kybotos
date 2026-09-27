@@ -19,6 +19,9 @@ void host_sdl_clear_slots(void);
  * アプリが hostapi_poll_event で drain する。アプリ切り替え時に clear */
 void host_sdl_masterui_init(void); /* Phase 21b */
 void draw_master_overlay_if_open(void); /* Phase 21b: メニュー画面でも重ねる */
+/* Phase 22: アプリの文字スロットを列挙する(コマンドの入口の `texts`)。emit を呼んだ件数を返す */
+typedef void (*host_text_emit_fn)(int x, int y, uint32_t rgb888, const char* text);
+int host_sdl_dump_texts(host_text_emit_fn emit);
 void host_sdl_push_touch(bool down, int x, int y);
 /* Phase 18a: 押下中の移動(スワイプ用)。間引き・畳み込みは実装側で行う
  * (規則は shared/hostapi_defs.h。実機の LV_EVENT_PRESSING に相当) */
