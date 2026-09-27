@@ -439,3 +439,38 @@ W WASM/API: audio_play: failed: /sdcard/music/hcheck_missing.mp3
 **外の conf の形で実機**(`captures/phase22-extconf-device/`): 上の 3 本 + midi_loopback × 3(シナリオ無し、+0、反復一致)で **PASS**。
 1 回目は midi_loopback の 3 回目で `free_psram` / `largest_psram` が空になり「反復で free_psram が変化」で落ちた。ログの行は完全だったので、
 **tee が書き途中の行にスクリプトが一致した**(`app: stopped free_int=` まで書かれた時点)。以前からあり得た競合で、**行末の `]` まで待つ**ように直した。
+
+## ステップ 5: 回帰と所要時間(2026-09-27)
+
+### 所要時間(スクリプトの開始から終了までの壁時計)
+
+| 回帰 | 統合前(`3bea232`) | 統合後 | 備考 |
+|---|---|---|---|
+| **実機** `device-regress.sh` | **147 秒**(5 本、4 本 × 3 回 + seq_smoke 60 秒) | **45 秒**(metronome × 3 + mp3player × 1 + hostapi_check × 1) | 約 3 分の 1。**しかも今回はタップと表示の確認を含む** |
+| **Linux** `linux-regress.sh` | 27 秒(5 本 × 5 秒保持) | **29 秒**(metronome 4 秒 / mp3player 4 秒 / hostapi_check 21 秒) | 統合前は seq_smoke の自己検査を最後まで待っていなかった(5 秒で ESC)ので、同じ条件の比較ではない |
+
+### 既存アプリへの影響が無いこと(ゲート 3 / 完了条件 4)
+
+- **metronome / mp3player の `.wasm` は変えていない**(git の差分なし)。**Linux の highmark は metronome 22,952 / mp3player 19,112 で統合前と同じ**。
+  midi_loopback(`wasm-apps/dev/` へ移しただけ)も 29,120 で同じ。
+- 実機の停止時の値: free_int 150,312 → **150,304(−8 B)**、largest_int 102,400 → **98,304**(`MIN_LARGEST_INT` ちょうど。ユーザー判断で据え置き。
+  ステップ 1 のファームから同じ値なので、シリアルコンソールと注入の追加による静的領域のわずかな増減でブロックの境界がずれたと見ている)。
+- **既定(OFF)のファームと ON のファームで、停止時の値は同じ**(OFF で metronome を起動・停止: free_int 150,304 / largest_int 98,304)。
+  埋め込む `.wasm` はフラッシュ上の rodata なので RAM に効かない、という設計メモ c の見立てどおり。
+
+### 既定のファームのランチャー(完了条件 3)
+
+`src/build`(ON)を崩さないよう、`captures/phase22-off-build` に OFF でビルドしてフラッシュした。起動直後の `ls` は 8 本
+(古いファームが置いた seq_smoke / touch_demo / midi_loopback / synth_probe / hostapi_check が残っている。P7 のとおり)。
+**`rm` で 5 本を消し**(sequencer はユーザーの非公開アプリなので残した)、ランチャーは **Settings / sequencer / metronome / mp3player** になった
+(`captures/phase22-step5/cam_still_154250.png`)。**実機は OFF のファームのまま残した**(普段使いの状態)。回帰を回すときは `src/build`(ON)を焼き直す。
+
+**運用上の注意**: ON のファームを焼くと検査用・診断用アプリが SD に置かれ、OFF に戻しても残る。**回帰の後に OFF に戻したら `rm` で消す**(決定 1 の結果)。
+手間が気になるようなら、設計メモ c の「`.seeded` の一覧」を後で入れられる(roadmap に残す)。
+
+### 音(人間の確認用)
+
+ON のファームで、カメラ録画(`captures/phase22-step5/cam_rec_153847.mp4`、h264 / aac、20 秒)しながらシリアルから
+metronome の START → 5 秒 → STOP、mp3player の PLAY → 6 秒 → STOP を流した。1 秒ごとのピークでは **metronome の区間(4〜9 秒)に拍のピーク
+(−39〜−41 dBFS、暗騒音 −48〜−52)**が出ている。MP3 の区間(14〜18 秒)はピークが小さい(ミキサーの既定が Master 50 × MP3 35)。
+**最終確認はユーザーの耳**(回帰の合否には入れない)。
