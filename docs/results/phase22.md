@@ -509,3 +509,11 @@ metronome の START → 5 秒 → STOP、mp3player の PLAY → 6 秒 → STOP �
 - **U-31**: ON ↔ OFF を行き来すると検査用アプリが SD に残る(`rm` で消す)。
 - **`MIN_LARGEST_INT` ちょうど**: 次に静的領域が増えて下回ったら、free_int の差を見てから判断する。
 - **音の最終確認**(`captures/phase22-step5/cam_rec_153847.mp4`)はユーザーに依頼する。
+
+### 追記: 非公開の app-sequencer の追従(2026-09-27)
+
+外のアプリの conf は kybotos の conf を source するので、対象が 3 本になったことにはそのまま追従する。ただし app-sequencer は
+**自分のビルドディレクトリで sequencer 入りのファームを作る**ので、そのファームに hostapi_check が入っていないと、回帰は最初の `ls` の確認で止まる。
+app-sequencer のビルドスクリプトに ON / OFF の指定(回帰用は ON、普段使いは OFF)を足し、**sequencer を含む 4 本で実機・Linux とも PASS** した
+(sequencer × 3 は +0・反復一致、警告 0)。実機はそのあと OFF のファームに戻し、SD の検査用アプリを `rm` で消した
+(ランチャーは sequencer / metronome / mp3player)。
