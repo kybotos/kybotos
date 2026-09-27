@@ -24,6 +24,15 @@ docs/results/phaseXX.md    ← 調査・計画・実施記録・実測値・ト�
 
 ## ① フェーズ計画
 
+### Platform(現在のトラック)
+
+Host API・ホスト・ランタイム・SDK・検証基盤のフェーズ。**Sequencer とは独立**に進める(2026-09-27 から)。
+
+| Phase | 目的 | 状態 | 完了条件の要点 | 依存 |
+|---|---|---|---|---|
+| **22** | **回帰アプリの統合と、タップの自動化** | **done**(2026-09-27) | **回帰を metronome / mp3player + 検査アプリ `hostapi_check`(`wasm-apps/dev/`)の 3 本に**(touch_demo 削除、seq_smoke を吸収、midi_loopback / synth_probe を `wasm-apps/dev/` へ)。**既定のファームは実用アプリだけ**(`KYBOTOS_DEV_APPS=ON` で検査用・診断用を埋め込む)。**実機はシリアルコンソール(`tap` / `hold` / `drag` / `key` / `texts` / `rm`)、Linux は `KYBOTOS_CMD_FIFO` から注入**し、画面の文字で判定(シナリオ `SCENARIO[<app>]`、`scripts/regress-scenario.sh`)。**実機の回帰 147 → 45 秒**、Linux は xdotool 不要に。**Host API / ABI 不変**、metronome / mp3player の highmark 不変。workflow §1-8 を改訂(ユーザー承認)。`docs/results/phase22.md` | 21f |
+| 23〜 | 候補: **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27) | deferred | — | 22 |
+
 ### Sequencer App(2026-09-27 に終了)
 
 Sequencer アプリは非公開の app-sequencer で開発している(2026-09-26 に repo を分割。`docs/results/repo-split.md`)。
@@ -51,15 +60,6 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 | **21e** | Chapter の Drum 列と Song 再生 | **done**(2026-09-23) | **非公開**(アプリ側の記録は非公開の app-sequencer)。プラットフォーム側: rect スロット 80、プール 176KB、**内蔵音源の遅延の測定(U-22)**。`docs/results/phase16-21-platform.md` | 21d |
 | **21f** | Chapter のグリッドから再生 | **done**(2026-09-23) | **非公開**(アプリ側の記録は非公開の app-sequencer)。プラットフォーム側: Linux の記号の追加のみ。`docs/results/phase16-21-platform.md` | 21e |
 | (以後) | **Sequencer トラックはここで終了**(2026-09-27、ユーザー判断)。Sequencer の次の機能の計画は非公開の app-sequencer 側。プラットフォームの計画は下の Platform トラック | done | — | 21f |
-
-### Platform(現在のトラック)
-
-Host API・ホスト・ランタイム・SDK・検証基盤のフェーズ。**Sequencer とは独立**に進める(2026-09-27 から)。
-
-| Phase | 目的 | 状態 | 完了条件の要点 | 依存 |
-|---|---|---|---|---|
-| **22** | **回帰アプリの統合と、タップの自動化** | **done**(2026-09-27) | **回帰を metronome / mp3player + 検査アプリ `hostapi_check`(`wasm-apps/dev/`)の 3 本に**(touch_demo 削除、seq_smoke を吸収、midi_loopback / synth_probe を `wasm-apps/dev/` へ)。**既定のファームは実用アプリだけ**(`KYBOTOS_DEV_APPS=ON` で検査用・診断用を埋め込む)。**実機はシリアルコンソール(`tap` / `hold` / `drag` / `key` / `texts` / `rm`)、Linux は `KYBOTOS_CMD_FIFO` から注入**し、画面の文字で判定(シナリオ `SCENARIO[<app>]`、`scripts/regress-scenario.sh`)。**実機の回帰 147 → 45 秒**、Linux は xdotool 不要に。**Host API / ABI 不変**、metronome / mp3player の highmark 不変。workflow §1-8 を改訂(ユーザー承認)。`docs/results/phase22.md` | 21f |
-| 23〜 | 候補: **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27) | deferred | — | 22 |
 
 ### 完了したフェーズ(要約)
 
