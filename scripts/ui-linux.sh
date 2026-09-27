@@ -8,6 +8,11 @@
 #   ui-linux.sh key   KEY            キー送信(Escape = 強制終了、BackSpace = 戻る)
 #   ui-linux.sh shot  NAME           静止画を $UI_CAPTURE_DIR/NAME.png に撮る(既定 captures/ui)
 #
+# **KYBOTOS_CMD_FIFO(ホストのコマンドの入口。Phase 22)が FIFO を指していれば、tap / hold / drag / key は
+# そちらへ流す**(xdotool を使わない。回帰と同じ経路で、ユーザーのマウスとも干渉しない)。key は BackSpace → `key back`、
+# Escape → `stop`。ホストを同じ KYBOTOS_CMD_FIFO で起動しておくこと(docs/workflow.md §3.6)。
+# 無ければ従来どおり xdotool(手動の確認用。回帰には使わない。§1-8)。
+#
 # 座標は**アプリの論理座標(320x240)**。ウィンドウは kybotos_host の pid と一致するものを選ぶ
 # (docs/workflow.md §3.6)。合成クリックは要求したウィンドウ座標がそのまま届く(×2 = WINDOW_SCALE)。
 # **ドラッグは実ポインタを動かすので絶対座標**で、`mousemove --window 0 0` → `getmouselocation` で
@@ -16,6 +21,21 @@ set -u
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${UI_CAPTURE_DIR:-$REPO/captures/ui}
 export DISPLAY=${DISPLAY:-:0}
+FIFO=${KYBOTOS_CMD_FIFO:-}
+if [ -n "$FIFO" ] && [ -p "$FIFO" ]; then
+  send() { printf '%s\n' "$1" > "$FIFO"; }
+  case "${1:-}" in
+    tap)  send "tap $2 $3"; sleep 0.4; exit 0 ;;
+    hold) send "hold $2 $3 $4"; sleep "$(printf '%d.%03d' $((($4 + 400) / 1000)) $((($4 + 400) % 1000)))"; exit 0 ;;
+    drag) send "drag $2 $3 $4 $5 $6"; sleep "$(printf '%d.%03d' $((($6 + 800) / 1000)) $((($6 + 800) % 1000)))"; exit 0 ;;
+    key)  case "$2" in
+            BackSpace) send "key back" ;;
+            Escape)    send "stop" ;;
+            *) echo "ui-linux: key $2 is not supported through the FIFO" >&2; exit 2 ;;
+          esac
+          sleep 0.4; exit 0 ;;
+  esac
+fi
 pid=$(pgrep -x kybotos_host | head -1)
 [ -z "$pid" ] && { echo "ui-linux: kybotos_host is not running" >&2; exit 1; }
 WIN=""
@@ -40,5 +60,5 @@ case "${1:-}" in
         sleep 0.3; xdotool mouseup 1; sleep 0.4 ;;
   key)  xdotool key --window "$WIN" "$2"; sleep 0.4 ;;
   shot) mkdir -p "$OUT"; "$REPO/scripts/screen-still.sh" "$OUT" "$2" >/dev/null 2>&1; echo "$OUT/$2.png" ;;
-  *)    sed -n '2,16p' "$0"; exit 2 ;;
+  *)    sed -n '2,21p' "$0"; exit 2 ;;
 esac

@@ -376,3 +376,53 @@ W WASM/API: fs_read: rejected path '.hcheck_dot' (11 bytes)        … fs_read /
 E AUDIO/MP3: Failed to open MP3 file: /sdcard/music/hcheck_missing.mp3
 W WASM/API: audio_play: failed: /sdcard/music/hcheck_missing.mp3
 ```
+
+## ステップ 4: 置き場所の変更と、回帰のシナリオ(2026-09-27、途中)
+
+### 実装
+
+| 対象 | 変更 |
+|---|---|
+| `wasm-apps/touch_demo/`、`wasm-apps/seq_smoke/` | 削除(seq_smoke は hostapi_check が両ホストで PASS した後。ゲート 7) |
+| `wasm-apps/midi_loopback/`、`synth_probe/` | `wasm-apps/dev/` へ `git mv`(`.wasm` は再ビルドしていない) |
+| `src/components/wasm_runtime/CMakeLists.txt` | 既定の表 = mp3player / metronome、`KYBOTOS_DEV_APP_LIST` = hostapi_check / midi_loopback / synth_probe |
+| `scripts/regress-scenario.sh`(新規) | シナリオの実行部。`wait` / `tap` / `hold` / `drag` / `key back` / `expect[@秒] <文字列>`。応答のログと接頭辞と送る関数を呼ぶ側が決める |
+| `scripts/device-regress.conf` | `APPS="metronome mp3player hostapi_check"`、`APP_WASM[hostapi_check]`、**`SCENARIO`(スキーマの追加。ステップ 0 f で承認済み)**、`REPEAT_OVERRIDE[hostapi_check]=1`、`EXPECT_DELTA[hostapi_check]=-176`、許容パターン 3 つ(`hcheck_` に限る)、`HOLD_OVERRIDE` の seq_smoke を削除 |
+| `scripts/device-regress.sh` | シナリオの実行と「シナリオ」列、**最初の `ls` で APPS が SD にあるか確かめる**(無ければ DEV_APPS の案内を出して止まる)、**U-18**: `stop` の応答が `stop idle` なら「保持中に停止した」 |
+| `scripts/linux-regress.sh` | **FIFO 方式に書き直し**(xdotool を使わない。終了も `stop`)、シナリオ、`HOLD_OVERRIDE` / `HOLD_SEC`、MP3 が無ければ assets からコピー、アプリごとの所要秒 |
+| `scripts/ui-linux.sh` | `KYBOTOS_CMD_FIFO` が FIFO なら tap / hold / drag / key をそちらへ(Escape → `stop`、BackSpace → `key back`)。無ければ従来どおり xdotool |
+| `scripts/wasm_imports.py`(新規) | アプリ × Host API のカバレッジ表(ステップ 0 a の表を出したもの) |
+| `hosts/linux/main.c` | **`cmd_fifo_open()` を main の先頭へ**(下記) |
+| `.github/workflows/build.yml` | `-B build-dev -DKYBOTOS_DEV_APPS=ON` のビルドを 1 本追加。`.gitignore` に `src/build-dev/` |
+
+### 途中で直したこと
+
+- **`ls` の判定**: モニタのログの行末は `\r` なので、`wasm$` では一致しなかった(3 本とも「SD に無い」と誤判定)。`[[:space:]]*$` にした。
+- **Linux で `app started` が 15 秒見えなかった**: `setvbuf`(行バッファ)を `cmd_fifo_open()` の中で呼んでいたが、それが **SDL の初期化などで stdout に書いた後**だったので効いておらず、
+  `app started` は次の応答の `fflush` まで出ていなかった(回帰は待ちの上限 15 秒で先へ進んでいた)。**stdout に何か書く前(main の先頭)で開く**ようにした。
+  1 本あたり 19 秒 → 4 秒。ステップ 3 で「第 1 部は Linux で約 8 秒」と書いたのはこの 15 秒の後から数えていたためで、**実際は約 18 秒**(実機とほぼ同じ)。
+
+### 確認
+
+**Linux(`captures/phase22-step4-linux/`)**: 3 本とも PASS、**29 秒**(metronome 4 秒 / mp3player 4 秒 / hostapi_check 21 秒)。
+**highmark は metronome 22,952 / mp3player 19,112 で統合前と同じ**(ゲート 3)。hostapi_check 34,728。
+
+**外の conf の形**(`. device-regress.conf` → `APPS="$APPS midi_loopback"` + `APP_WASM`、シナリオ無し)で midi_loopback を足しても従来どおり回った
+(`scenario=-`、7 秒、highmark 29,120 は統合前と同じ)。
+
+**`ui-linux.sh` の FIFO 経路**: `tap 281 202` → STOP、`hold 125 202 700` → BPM 130(長押しの連打が効く)、`key Escape` → `stop ok`。
+
+**実機(`captures/phase22-step4-device/report.md`)**: **53 秒**(統合前 147 秒)。シナリオはすべて合格、許容外の警告 0 件。**判定は FAIL**:
+
+| アプリ | int 差分 | largest_int | シナリオ | 判定 |
+|---|---|---|---|---|
+| metronome #1〜#3 | +0 | 98,304 | PASS(8 手順) | PASS |
+| **mp3player #1** | **−36** | 98,304 | PASS(6 手順) | **FAIL(期待 0)** |
+| mp3player #2 / #3 | +0 | 98,304 | PASS | PASS(反復 3 回の終了値も一致) |
+| hostapi_check | −176(期待どおり) | 98,304 | PASS(6 手順) | PASS |
+
+- **U-23 の −36 B は、積み上がるリークではなく「起動後に初めて MP3 を再生したときの一度きりの確保」だった**(2・3 回目は +0、終了値も 3 回一致)。
+  hostapi_check の −176 B(起動後に初めて書き込み用にファイルを開いたとき)と同じ種類。今の conf の書式(`EXPECT_DELTA` はすべての回に同じ値を要求)では
+  「1 回目だけ減ってよい」を表せない。→ **ユーザー判断待ち**。
+- **`largest_int` が統合前の 102,400 から 98,304 に下がり、`MIN_LARGEST_INT`(98,304)ちょうど**。free_int は 150,312 → 150,304(−8 B)しか変わっていないので、
+  **静的領域のわずかな増減でブロックの境界がずれた**(U-29 の版の違いのときと同じ種類)と見ている。判定は `≥` なので通る。→ **ユーザーに報告**。

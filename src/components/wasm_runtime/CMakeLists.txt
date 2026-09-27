@@ -2,14 +2,8 @@
 # launcher は seed の表(ビルド時に生成する embedded_apps.c)を回すだけで、アプリ名を知らない。
 set(WASM_APPS_DIR "${COMPONENT_DIR}/../../../wasm-apps")
 set(KYBOTOS_BUILTIN_APPS
-    "${WASM_APPS_DIR}/touch_demo/touch_demo.wasm"
     "${WASM_APPS_DIR}/mp3player/mp3player.wasm"
     "${WASM_APPS_DIR}/metronome/metronome.wasm"
-    "${WASM_APPS_DIR}/midi_loopback/midi_loopback.wasm"
-    # 新 API 12 関数の恒久スモーク(Phase 11)
-    "${WASM_APPS_DIR}/seq_smoke/seq_smoke.wasm"
-    # 内蔵音源ポートの検証用(Phase 21)。回帰には入れない
-    "${WASM_APPS_DIR}/synth_probe/synth_probe.wasm"
 )
 
 # この repo の外にあるアプリを一緒に埋め込む口。`.wasm` の絶対パスを `;` 区切りで渡す:
@@ -22,7 +16,12 @@ set(KYBOTOS_EXTRA_APPS "" CACHE STRING "Extra .wasm apps to embed and seed (abso
 # 回帰に使うファームは ON でビルドする: idf.py -DKYBOTOS_DEV_APPS=ON build(キャッシュに残る。docs/workflow.md §3.4)
 option(KYBOTOS_DEV_APPS "Embed the test and diagnostic apps in wasm-apps/dev" OFF)
 set(KYBOTOS_DEV_APP_LIST
+    # Host API の検査(回帰に使う。Phase 22 で seq_smoke を吸収した)
     "${WASM_APPS_DIR}/dev/hostapi_check/hostapi_check.wasm"
+    # MIDI ループバックの診断(Phase 9b / 14。計測器)
+    "${WASM_APPS_DIR}/dev/midi_loopback/midi_loopback.wasm"
+    # 内蔵音源ポートの検証用(Phase 21)
+    "${WASM_APPS_DIR}/dev/synth_probe/synth_probe.wasm"
 )
 if(KYBOTOS_DEV_APPS)
     list(APPEND KYBOTOS_BUILTIN_APPS ${KYBOTOS_DEV_APP_LIST})

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # device-regress.sh — 実機回帰の自動化(Phase 12 作業 3)
 #
-# 残したアプリを順に「run → 起動待ち → 一定時間保持 → stop → 停止待ち」で回し、
+# 残したアプリを順に「run → 起動待ち → シナリオ(無ければ一定時間保持)→ stop → 停止待ち」で回し、
 # free heap / largest free block / WARN・ERROR を集計して Markdown の表と合否を出す。
-# ユーザーの物理操作は不要。音と画面の目視確認は自動化しない(docs/workflow.md §3.3 の
-# カメラ+人間操作はそのまま残す)。
+# ユーザーの物理操作は不要。**シナリオ**(Phase 22)は conf の SCENARIO[<app>] で、シリアルコンソールの
+# tap / hold / drag / key でアプリを操作し、texts で画面の文字を確かめる(scripts/regress-scenario.sh)。
+# 音と見た目の最終確認は自動化しない(docs/workflow.md §3.3 のカメラ+人間操作はそのまま残す)。
 #
 # 前提:
 #   - ファームウェアが CONFIG_KYBOTOS_SERIAL_CMD=y でビルド・フラッシュ済み
-#     (シリアルコマンド ping / ls / run / stop / heap。応答はタグ KBCMD のログ行)
+#     (シリアルコマンド ping / ls / run / stop / heap / tap / hold / drag / key / texts。応答はタグ KBCMD のログ行)
+#   - conf の APPS がすべて SD にあること(wasm-apps/dev/ のアプリは KYBOTOS_DEV_APPS=ON のファームにだけ入る。
+#     最初の ls で確かめ、足りなければ止まる)
 #   - herdr が動いていて scripts/hpane.sh が使えること
 #
 # 待ち方について(docs/workflow.md §1-2 の趣旨):
@@ -93,6 +96,13 @@ wait_line() {
 
 send_cmd() { "$HPANE" send esp32-monitor "$1" >/dev/null 2>&1; }
 
+# シナリオの実行部(Phase 22)。応答はモニタのログに KBCMD 行で出る
+# shellcheck source=regress-scenario.sh
+. "$REPO/scripts/regress-scenario.sh"
+SCN_LOG=$LOG
+SCN_PREFIX='KBCMD: '
+scn_send() { send_cmd "$1"; }
+
 # --- モニタの起動 / 後始末 ---------------------------------------------------
 
 # **idf.py monitor を走らせているコンテナだけ**を返す(Phase 21e)。イメージで絞るだけだと、
@@ -148,6 +158,21 @@ if ! wait_line 'KBCMD: pong' "$mark" 10 >/dev/null; then
 fi
 say "console ready"
 
+# 対象のアプリが SD にあるか(Phase 22)。wasm-apps/dev/ のアプリは KYBOTOS_DEV_APPS=ON のファームにしか無い
+mark=$(line_count); send_cmd "ls"
+if ! wait_line 'KBCMD: ls (done|err)' "$mark" 10 >/dev/null; then
+    say "ERROR: no response to ls."; exit 1
+fi
+missing=""
+for app in $APPS; do
+    tail -n "+$((mark + 1))" "$LOG" | strip_ansi | grep -aqE "KBCMD: app ${app}\\.wasm[[:space:]]*\$" || missing="$missing $app"
+done
+if [ -n "$missing" ]; then
+    say "ERROR: not on the SD card:$missing"
+    say "       wasm-apps/dev/ のアプリは -DKYBOTOS_DEV_APPS=ON でビルドしたファームにだけ入る(docs/workflow.md §3.4)。"
+    exit 1
+fi
+
 # --- 各アプリを回す ----------------------------------------------------------
 
 declare -a ROWS=()
@@ -155,6 +180,7 @@ overall=0
 
 # 反復回数(U-2、Phase 18)。conf に無ければ 1 回
 declare -p REPEAT_OVERRIDE >/dev/null 2>&1 || declare -A REPEAT_OVERRIDE=()
+declare -p SCENARIO >/dev/null 2>&1 || declare -A SCENARIO=()
 
 for app in $APPS; do
     hold="${HOLD_OVERRIDE[$app]:-$HOLD_SEC}"
@@ -167,21 +193,39 @@ for app in $APPS; do
     mark=$(line_count)
     send_cmd "run $app"
     if ! runline=$(wait_line 'KBCMD: run (ok|err)' "$mark" 20); then
-        ROWS+=("| $label | - | - | - | - | - | - | FAIL(run 応答なし) |"); overall=1; continue
+        ROWS+=("| $label | - | - | - | - | - | - | - | FAIL(run 応答なし) |"); overall=1; continue
     fi
     if [[ "$runline" == *"run err"* ]]; then
-        ROWS+=("| $label | - | - | - | - | - | - | FAIL(${runline#*KBCMD: }) |"); overall=1; continue
+        ROWS+=("| $label | - | - | - | - | - | - | - | FAIL(${runline#*KBCMD: }) |"); overall=1; continue
     fi
     if ! wait_line 'app: app_init\(\)' "$mark" 20 >/dev/null; then
-        ROWS+=("| $label | - | - | - | - | - | - | FAIL(app_init に到達せず) |"); overall=1; continue
+        ROWS+=("| $label | - | - | - | - | - | - | - | FAIL(app_init に到達せず) |"); overall=1; continue
     fi
 
-    sleep "$hold"
+    # シナリオ(Phase 22)。無ければ従来どおり保持するだけ
+    scn="-"
+    if [ -n "${SCENARIO[$app]:-}" ]; then
+        run_scenario "$app" "${SCENARIO[$app]}"
+        scn=$SCN_RESULT
+        if [[ "$scn" != PASS* ]]; then
+            say "    scenario: $scn"
+            say "    last texts:"; printf '      %s\n' "$SCN_LAST_TEXTS" >&2
+        fi
+    else
+        sleep "$hold"
+    fi
 
     mark=$(line_count)
     send_cmd "stop"
+    if ! stopresp=$(wait_line 'KBCMD: stop (ok|idle)' "$mark" 10); then
+        ROWS+=("| $label | - | - | - | - | - | - | $scn | FAIL(stop 応答なし) |"); overall=1; continue
+    fi
+    # U-18(Phase 22): stop idle = こちらが止める前にアプリが止まっていた(電源キーの短押し、トラップなど)
+    if [[ "$stopresp" == *"stop idle"* ]]; then
+        ROWS+=("| $label | - | - | - | - | - | - | $scn | FAIL(保持中に停止した。monitor.log の時系列を見る) |"); overall=1; continue
+    fi
     if ! stopline=$(wait_line 'app: stopped \(' "$mark" 30); then
-        ROWS+=("| $label | - | - | - | - | - | - | FAIL(停止しない) |"); overall=1; continue
+        ROWS+=("| $label | - | - | - | - | - | - | $scn | FAIL(停止しない) |"); overall=1; continue
     fi
 
     # I (12345) WASM: app: stopped (ok), free heap 105880 (at start 105880), largest block 57344
@@ -191,7 +235,7 @@ for app in $APPS; do
     #   app: stopped free_int=N largest_int=N free_psram=N largest_psram=N \
     #       [start free_int=N free_psram=N]
     if ! statline=$(wait_line 'app: stopped free_int=' "$mark" 10); then
-        ROWS+=("| $app | - | - | - | - | - | - | FAIL(4 値行が出ない) |"); overall=1; continue
+        ROWS+=("| $app | - | - | - | - | - | - | - | FAIL(4 値行が出ない) |"); overall=1; continue
     fi
     # free_int / free_psram は行の前半と "[start ...]" の両方に出るので、先に切り分ける
     # (sed の .* は貪欲で、切らないと最後の出現 = 開始値を拾ってしまう)。
@@ -208,6 +252,7 @@ for app in $APPS; do
 
     verdict="PASS"
     [ "$state" != "ok" ] && { verdict="FAIL(state=$state)"; overall=1; }
+    [ "$scn" != "-" ] && [[ "$scn" != PASS* ]] && { verdict="FAIL(シナリオ)"; overall=1; }
     # リーク検出(差分は厳密一致)
     [ "$d_i" != "$want_i" ] && { verdict="FAIL(int delta=$d_i 期待 $want_i)"; overall=1; }
     [ "$d_p" != "$want_p" ] && { verdict="FAIL(psram delta=$d_p 期待 $want_p)"; overall=1; }
@@ -219,7 +264,7 @@ for app in $APPS; do
     [ "$fin_p"  -lt "$MIN_FREE_PSRAM" ] &&
         { verdict="FAIL(free_psram=$fin_p < $MIN_FREE_PSRAM)"; overall=1; }
 
-    ROWS+=("| $label | $start_i | $fin_i | $(printf '%+d' "$d_i") | $lgst_i | $(printf '%+d' "$d_p") | $lgst_p | $verdict |")
+    ROWS+=("| $label | $start_i | $fin_i | $(printf '%+d' "$d_i") | $lgst_i | $(printf '%+d' "$d_p") | $lgst_p | $scn | $verdict |")
     RUN_FIN_I+=("$fin_i"); RUN_FIN_P+=("$fin_p")
   done
 
@@ -227,7 +272,7 @@ for app in $APPS; do
     # 下がる漏れを捕まえるため、N 回の終了時の値がすべて同じことを要求する
     if [ "$runs" -gt 1 ]; then
         if [ "${#RUN_FIN_I[@]}" -ne "$runs" ]; then
-            ROWS+=("| $app 反復 ${runs} 回 | - | - | - | - | - | - | FAIL(途中の回が失敗) |"); overall=1
+            ROWS+=("| $app 反復 ${runs} 回 | - | - | - | - | - | - | - | FAIL(途中の回が失敗) |"); overall=1
         else
             min_i=$(printf '%s\n' "${RUN_FIN_I[@]}" | sort -n | head -1)
             max_i=$(printf '%s\n' "${RUN_FIN_I[@]}" | sort -n | tail -1)
@@ -236,7 +281,7 @@ for app in $APPS; do
             rv="PASS"
             [ "$min_i" != "$max_i" ] && { rv="FAIL(反復で free_int が変化)"; overall=1; }
             [ "$min_p" != "$max_p" ] && { rv="FAIL(反復で free_psram が変化)"; overall=1; }
-            ROWS+=("| $app 反復 ${runs} 回 | - | ${min_i}〜${max_i} | - | - | - | psram ${min_p}〜${max_p} | $rv |")
+            ROWS+=("| $app 反復 ${runs} 回 | - | ${min_i}〜${max_i} | - | - | - | psram ${min_p}〜${max_p} | - | $rv |")
         fi
     fi
 done
@@ -262,8 +307,8 @@ we_bad_n=$(printf '%s' "$we_bad" | grep -ac . || true)
     echo "- ログ: \`captures/$TASK/monitor.log\`"
     echo "- 設定: \`$(realpath --relative-to="$REPO" "$CONF")\`"
     echo
-    echo "| アプリ | 開始 free_int | 終了 free_int | int 差分 | largest_int | psram 差分 | largest_psram | 判定 |"
-    echo "|---|---|---|---|---|---|---|---|"
+    echo "| アプリ | 開始 free_int | 終了 free_int | int 差分 | largest_int | psram 差分 | largest_psram | シナリオ | 判定 |"
+    echo "|---|---|---|---|---|---|---|---|---|"
     printf '%s\n' "${ROWS[@]}"
     echo
     echo "許容外の WARN/ERROR: **${we_bad_n} 件**"

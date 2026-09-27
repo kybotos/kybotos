@@ -310,6 +310,10 @@ int main(int argc, char** argv)
     bool single_mode = false;
     const char* single_path = NULL;
 
+    /* Phase 22: KYBOTOS_CMD_FIFO があればコマンドの入口を開く。**stdout を何か書く前に呼ぶ**
+     * (行バッファにする setvbuf は、ストリームに書いた後では効かない) */
+    cmd_fifo_open();
+
     if (argc > 1 && has_wasm_ext(argv[1])) {
         single_mode = true;
         single_path = argv[1];
@@ -340,8 +344,6 @@ int main(int argc, char** argv)
         fprintf(stderr, "register_natives failed\n");
         goto out;
     }
-
-    cmd_fifo_open(); /* Phase 22: KYBOTOS_CMD_FIFO があればコマンドの入口を開く */
 
     {
         App app;

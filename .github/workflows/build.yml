@@ -17,6 +17,12 @@ jobs:
           docker run --rm -v "$PWD:/workspaces/kybotos" -w /workspaces/kybotos/src \
             ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
             bash -c 'source /opt/esp-idf/export.sh && idf.py build'
+      # 回帰に使う構成(検査用・診断用アプリ入り。wasm-apps/dev/)。配布用とは埋め込むアプリの表だけが違う
+      - name: idf.py build (KYBOTOS_DEV_APPS=ON)
+        run: |
+          docker run --rm -v "$PWD:/workspaces/kybotos" -w /workspaces/kybotos/src \
+            ghcr.io/wurly200a/builder-esp32/esp-idf-v5.5:5.5.5 \
+            bash -c 'source /opt/esp-idf/export.sh && idf.py -B build-dev -DKYBOTOS_DEV_APPS=ON build'
       - name: dependencies.lock is unchanged
         run: git diff --exit-code -- src/dependencies.lock
 
