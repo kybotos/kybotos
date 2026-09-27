@@ -517,3 +517,13 @@ metronome の START → 5 秒 → STOP、mp3player の PLAY → 6 秒 → STOP �
 app-sequencer のビルドスクリプトに ON / OFF の指定(回帰用は ON、普段使いは OFF)を足し、**sequencer を含む 4 本で実機・Linux とも PASS** した
 (sequencer × 3 は +0・反復一致、警告 0)。実機はそのあと OFF のファームに戻し、SD の検査用アプリを `rm` で消した
 (ランチャーは sequencer / metronome / mp3player)。
+
+### 追記: 音の録り直し(2026-09-27)
+
+ステップ 5 の録画(`cam_rec_153847.mp4`)は**ユーザーが再生しても聞こえなかった**。原因は、`cam-rec.sh` が pulse の `default` から録っていて、
+**既定の入力がヘッドセット(Jabra EVOLVE 20)のマイクになっていた**こと(StreamCam のマイクではない)。平均 −53.8 / 最大 −37.6 dBFS で、
+ステップ 5 に「metronome の区間に拍のピーク」と書いたのは暗騒音の中の小さな差で、**聴ける音は録れていなかった**(記録の読み違い)。
+
+ユーザー判断で **`cam-rec.sh` に `CAM_AUDIO_SOURCE` を足し、既定を StreamCam のソース名にした**(workflow §3.3 に追記)。
+OFF のファームのまま録り直した `captures/phase22-step5b/cam_rec_155831.mp4` は**平均 −15.9 / 最大 0 dBFS**で、1 秒ごとの RMS は
+metronome の区間(3〜8 秒)−19〜−22 dBFS、無音の区間(9〜11 秒)−48〜−50、MP3 の区間(12〜18 秒)−5〜−22 dBFS。

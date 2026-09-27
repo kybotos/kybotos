@@ -25,6 +25,11 @@
 #     マッチングを使い、真のズレが半周期(250ms)超で符号を取り違えたこと。
 #     周期信号を A/V 同期の基準に使ってはならない(詳細は docs/dev-log.md)。
 #
+# 録音の入力(Phase 22 の後に追加): 既定は **StreamCam のマイク**(pulse のソース名)。以前は pulse の `default` から
+# 録っていたが、既定の入力がヘッドセット(Jabra)に変わっていて、実機の音がほぼ入らなかった(平均 -54 dBFS)。
+# 既定の入力はほかのアプリの都合で変わるので、ここで固定する。別の入力で録るときは CAM_AUDIO_SOURCE で渡す
+# (名前は `pw-cli ls Node | grep node.name` の alsa_input.*。`default` を渡せば従来どおり)。
+#
 # 使い方: scripts/cam-rec.sh [出力先ディレクトリ]  (省略時 captures/check-workflow/)
 # 停止: 標準入力に空行(Enter)を送る。
 set -uo pipefail  # ffmpeg は SIGINT 後に非0で終了しうるため -e は使わない
@@ -38,6 +43,8 @@ DEV=/dev/video0
 OUT="$OUTDIR/cam_rec_$(date +%H%M%S).mp4"
 # 音声を遅らせて起動オフセット(音声が約164ms早く始まる)を打ち消す(上記コメント参照)
 AUDIO_DELAY="${CAM_AUDIO_DELAY:-0.16}"
+AUDIO_SOURCE="${CAM_AUDIO_SOURCE:-alsa_input.usb-046d_Logitech_StreamCam_7131AF15-02.analog-stereo}"
+echo "audio source: $AUDIO_SOURCE"
 
 apply_settings() {
   v4l2-ctl -d "$DEV" -c auto_exposure=1
@@ -52,7 +59,7 @@ apply_settings() {
 ffmpeg -nostdin -loglevel warning \
        -f v4l2 -thread_queue_size 1024 -timestamps abs \
          -input_format mjpeg -video_size 1280x720 -framerate 30 -i "$DEV" \
-       -itsoffset "$AUDIO_DELAY" -f pulse -thread_queue_size 1024 -i default \
+       -itsoffset "$AUDIO_DELAY" -f pulse -thread_queue_size 1024 -i "$AUDIO_SOURCE" \
        -c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p -c:a aac \
        -movflags +faststart "$OUT" &
 FFPID=$!

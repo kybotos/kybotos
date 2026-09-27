@@ -293,6 +293,9 @@ pgrep -af kybotos_host                          # 残留なしを確認(何も�
 ```
 
 - 生成物は `ffprobe` で h264 / 正常な duration を確認。
+- **録音の入力は StreamCam のマイクに固定してある**(`CAM_AUDIO_SOURCE`、既定は StreamCam の pulse のソース名。Phase 22 の後)。
+  pulse の `default` から録っていたときは、既定の入力がヘッドセットに変わっていて実機の音がほぼ入らなかった(平均 −54 dBFS)。
+  録ったら `ffmpeg -i <mp4> -vn -af volumedetect -f null -` でレベルを見る(StreamCam で実機の音が入っていれば平均 −20 dBFS 前後)。
 - 動画・音声ずれは原因特定・修正済み(2026-07-20、check-workflow-routine 後の
   別タスク。詳細は scripts/cam-rec.sh 冒頭コメントと docs/results/av-sync-fix.md)。根本原因は
   ffmpeg が v4l2/pulse の 2 入力を**それぞれ自分の先頭時刻で 0 にリセット**し、
