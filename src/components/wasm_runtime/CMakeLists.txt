@@ -18,6 +18,16 @@ set(KYBOTOS_BUILTIN_APPS
 # (分けないと、以後この repo だけのビルドにも外のアプリが入る)。
 set(KYBOTOS_EXTRA_APPS "" CACHE STRING "Extra .wasm apps to embed and seed (absolute paths, ;-separated)")
 
+# 検査用・診断用のアプリ(wasm-apps/dev/。Phase 22)。**既定のファームには入れない**(ランチャーに実用アプリだけを出す)。
+# 回帰に使うファームは ON でビルドする: idf.py -DKYBOTOS_DEV_APPS=ON build(キャッシュに残る。docs/workflow.md §3.4)
+option(KYBOTOS_DEV_APPS "Embed the test and diagnostic apps in wasm-apps/dev" OFF)
+set(KYBOTOS_DEV_APP_LIST
+    "${WASM_APPS_DIR}/dev/hostapi_check/hostapi_check.wasm"
+)
+if(KYBOTOS_DEV_APPS)
+    list(APPEND KYBOTOS_BUILTIN_APPS ${KYBOTOS_DEV_APP_LIST})
+endif()
+
 set(_apps ${KYBOTOS_BUILTIN_APPS} ${KYBOTOS_EXTRA_APPS})
 set(_gen "${CMAKE_CURRENT_BINARY_DIR}/embedded_apps.c")
 # 依存関係を集める先行評価(CMAKE_BUILD_EARLY_EXPANSION)では、ファイルの確認も生成もしない

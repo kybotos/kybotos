@@ -313,3 +313,66 @@ Host API は 30 関数 + 任意 export 2 つ。抽出は `.wasm` の import / ex
 `drag 160 0 0 80 0` で **Settings が開いた**(`screen_still_144158.png`)、× で閉じて START のタップがアプリに届く、
 `key back` → `key back -> stop` → `app stopped`、`stop` → `app stopped`、プロセスの残留なし、警告 0。
 **FIFO を指定しなければ従来どおり**(`cmd fifo` の行も `CMD:` の行も出ない)。
+
+## ステップ 3: 検査アプリ `hostapi_check`(2026-09-27)
+
+### 実装
+
+| ファイル | 変更 |
+|---|---|
+| `wasm-apps/dev/hostapi_check/`(新規) | 検査アプリ(依存 0・no_std、8,175 B)。第 1 部 18 項目 + 第 2 部 3 項目、合否は最下行の `RESULT PASS` / `RESULT WAIT <残り>` / `RESULT FAIL <項目>`。検査の一覧と意図して外したものはソース冒頭のコメント |
+| `src/components/wasm_runtime/CMakeLists.txt` | `option(KYBOTOS_DEV_APPS … OFF)`。ON のときだけ `wasm-apps/dev/` のアプリを埋め込む(この時点では hostapi_check だけ。移動はステップ 4) |
+| `src/components/wasm_runtime/hostapi.cpp` / `hosts/linux/hostapi_sdl.c` | **拒否したパスをログに出す**(`fs_read: rejected path '<名前>' (<長さ> bytes)`。印字できない文字は `?`、64 文字で切る)。回帰の許容パターンを検査アプリの名前(`hcheck_`)だけに当てるため。Host API の挙動は変えていない |
+| `.gitignore` | `wasm-apps/dev/*/target/` |
+
+`src/build` は決定 2 のとおり **`-DKYBOTOS_DEV_APPS=ON` で構成した**(`CMakeCache.txt` に `KYBOTOS_DEV_APPS:BOOL=ON`)。
+
+### 時間を縮めた方法と、そこで踏んだこと
+
+seq_smoke の 12 項目は、**検査の中身(小節の数え方・件数)を変えずにテンポだけを上げた**: 基本 120 → 240bpm、速いテンポ 180 → 360bpm、
+V1(100 小節)は 150,000 / 160,000µs → **75,000 / 80,000µs**(約 800bpm)、最初の待ちを 2 → 1 小節、OP_STOP を 3 → 2 小節目。
+**第 1 部は Linux で約 8 秒**(seq_smoke は約 60 秒)。
+
+- **800bpm では V1 の先読みの予約が間に合わなかった。** 最初の `app_tick`(開始の 100ms 後)の時点で song はもう 1,280 tick 進んでいて、
+  小節 1 の頭(960)を過ぎている。**過去の tick にはテンポを書けない(-1)**ので小節 1 が前のテンポのまま進み、照合 83 回がすべて不一致になった
+  (診断行 `v1 n83 miss83 at1`、一時の表示で `upq 75000 at off 343` を確認)。**V1 を始める前(STOPPED 中)に先読みの範囲まで予約する**ように直した。
+  seq_smoke は 150,000µs で 100ms = 640 tick < 960 だったので踏んでいなかった(**元の seq_smoke は Linux でも 12 項目合格**を確認済み。
+  これまでの Linux の回帰は 5 秒で止めていたので、一度も最後まで見ていなかった)。
+- 診断行 `v1 n<照合回数> miss<不一致> at<最初に外れた小節> rx<MIDI 受信バイト>` は、失敗したときの手がかりとして残した。
+
+### 確認
+
+| | Linux | 実機 |
+|---|---|---|
+| 第 1 部 | 18 項目合格、約 8 秒 | 18 項目合格(V1 の照合 84 回・不一致 0) |
+| 第 2 部 | `tap 265 165` → tch、`drag 20 205 120 0 0` → mov(MOVE 4 件)、`key back` → key(`key back -> handled`) | 同じ(**タップの座標が完全に一致** = 注入した論理座標がそのままアプリに届く。ステップ 1 の宿題) |
+| 結果 | `RESULT PASS` | `RESULT PASS` |
+| わざと壊す | `tone_play(8)` の期待値を反転した一時ビルドで **`RESULT FAIL ton`** | — |
+| WAMR プール | highmark 33,976(Linux、256KB) | **highmark 24,752 / total 180,032**(起動後に最初に読んだアプリなので値は正しい) |
+| 色付きの行 | `text 12 166 40c0ff rgb 40c0ff` | 同じ |
+
+### 見つけたこと: 起動後に初めて書き込み用にファイルを開くと、internal が 176 B 減る(一度だけ)
+
+実機で hostapi_check の 1 回目だけ **free_int が −176 B**、2 回目以降は +0 だった。**ボードをリセットすると再現**する(データファイルが SD に残っていても)。
+
+- 検査を外した一時ビルドで二分探索: トーンと audio を外しても −176、**fs を外すと +0**、**既存ファイルの読み込みだけなら +0**。
+- ファームの一時コード(SD の準備の直後に、`fopen("wb")` / `fwrite` / `fclose` / `remove` / `rename` の前後の free_int を 2 周ぶん出す):
+  ```
+  round 0: fopen -264 fwrite -132 fclose 220 remove 0 rename 0 (total -176)
+  round 1: fopen  -88 fwrite -132 fclose 220 remove 0 rename 0 (total 0)
+  ```
+  **起動後 1 回目の書き込み用の `fopen` だけが 176 B 多く取り、返さない。** 2 回目からは同じ操作で 0。**リークではなく一度きりの確保**
+  (何が取っているか — newlib / VFS / FATFS のどれか — は未特定)。起動時にこの一時コードが先に書いたビルドでは、hostapi_check は +0 になった。
+- **回帰への影響**: 実機の回帰はモニタの起動でボードをリセットするので、**起動後に最初に `fs_write` を呼ぶアプリの 1 回目**に必ず −176 が出る。
+  metronome / mp3player は書かないので、**回帰では hostapi_check の 1 回目に決まって出る**。扱いはステップ 4 で決める。
+- 一時コードは撤去し、`git diff` で残っていないことを確認した。roadmap に課題として足す(U-30)。
+
+### 許容パターンに足すもの(ステップ 4 で conf に入れる)
+
+実機のログ(`captures/phase22-step3/monitor-1.log`)に出た、検査アプリが意図して起こす W / E 行:
+
+```
+W WASM/API: fs_read: rejected path '.hcheck_dot' (11 bytes)        … fs_read / fs_write × 不正な名前 4 つ
+E AUDIO/MP3: Failed to open MP3 file: /sdcard/music/hcheck_missing.mp3
+W WASM/API: audio_play: failed: /sdcard/music/hcheck_missing.mp3
+```

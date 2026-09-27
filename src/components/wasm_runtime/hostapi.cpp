@@ -633,6 +633,20 @@ void audio_refresh_finished()
 }
 
 // ミュージックルート相対パスの検証(サンドボックス境界)
+// Phase 22: 拒否したパスをログに残す(回帰の許容パターンを、検査アプリが渡す名前だけに当てるため)。
+// 印字できない文字は '?' にし、長さは 64 文字で切る
+void log_rejected_path(const char* fn, const char* path, uint32_t len)
+{
+    char shown[65];
+    const uint32_t n = len < 64 ? len : 64;
+    for (uint32_t i = 0; i < n; i++) {
+        const char c = path[i];
+        shown[i] = (c >= 0x20 && c < 0x7f) ? c : '?';
+    }
+    shown[n] = '\0';
+    ESP_LOGW(TAG, "%s: rejected path '%s' (%u bytes)", fn, shown, (unsigned)len);
+}
+
 bool audio_path_ok(const char* path, uint32_t len)
 {
     if (len == 0 || len > 64) return false;
@@ -648,7 +662,7 @@ int32_t native_hostapi_audio_play(wasm_exec_env_t exec_env, const char* path, ui
     (void)exec_env;
     char rel[65];
     if (!audio_path_ok(path, len)) {
-        ESP_LOGW(TAG, "audio_play: rejected path");
+        log_rejected_path("audio_play", path, len);
         s_audio_state.store(HOSTAPI_AUDIO_ERROR);
         return -1;
     }
@@ -799,7 +813,7 @@ int32_t native_hostapi_fs_read(wasm_exec_env_t exec_env, const char* path, uint3
     (void)exec_env;
     char full[96];
     if (!data_full_path(path, path_len, full, sizeof(full), "")) {
-        ESP_LOGW(TAG, "fs_read: rejected path");
+        log_rejected_path("fs_read", path, path_len);
         return -1;
     }
     FILE* f = fopen(full, "rb");
@@ -822,7 +836,7 @@ int32_t native_hostapi_fs_write(wasm_exec_env_t exec_env, const char* path, uint
     char tmp[96];
     if (!data_full_path(path, path_len, full, sizeof(full), "") ||
         !data_full_path(path, path_len, tmp, sizeof(tmp), ".tmp")) {
-        ESP_LOGW(TAG, "fs_write: rejected path");
+        log_rejected_path("fs_write", path, path_len);
         return -1;
     }
     FILE* f = fopen(tmp, "wb");

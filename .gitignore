@@ -4,6 +4,7 @@ src/managed_components/
 src/sdkconfig.old
 src/sdkconfig
 wasm-apps/*/target/
+wasm-apps/dev/*/target/
 hosts/linux/build/
 hosts/linux/sdcard/
 captures/
