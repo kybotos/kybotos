@@ -30,6 +30,7 @@
 #include "font8x8_basic.h"
 #include "hostapi_defs.h"
 #include "master_ui.h"   /* Phase 21b: マスター設定(両ホスト共有)*/
+#include "boot_sound.h"  /* Phase 22a 追記: 起動音(両ホスト共有)*/
 #include "hostapi_midi.h"
 #include "hostapi_seq.h"
 
@@ -383,6 +384,20 @@ static void wav_close(void)
  * 発音は「次に書くブロックの先頭」に丸まる = docs/results/phase21.md 0-c の案 A)。 */
 #define MIX_BLOCK 240
 
+/* 起動音(Phase 22a 追記)。実機の audio.cpp と同じく、ボイスとは別枠で PCM を 1 本だけ鳴らす。
+ * 音量はマスター音量だけを掛ける(開始時に固定)。オーディオスレッドのロック下で触る */
+static int s_boot_pos = BOOT_SOUND_FRAMES; /* BOOT_SOUND_FRAMES = 鳴っていない */
+static int s_boot_gain = 0;
+
+void host_sdl_play_boot_sound(void)
+{
+    if (!s_audio) return;
+    SDL_LockAudioDevice(s_audio);
+    s_boot_pos = 0;
+    s_boot_gain = s_master_vol;
+    SDL_UnlockAudioDevice(s_audio);
+}
+
 static void audio_callback(void* userdata, Uint8* stream, int len)
 {
     (void)userdata;
@@ -407,6 +422,11 @@ static void audio_callback(void* userdata, Uint8* stream, int len)
         memset(acc, 0, sizeof(int32_t) * (size_t)n);
         for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) {
             if (s_voices[v].kind != VK_IDLE) voice_render(&s_voices[v], acc, n);
+        }
+        if (s_boot_pos < BOOT_SOUND_FRAMES) {
+            const int m = (BOOT_SOUND_FRAMES - s_boot_pos < n) ? BOOT_SOUND_FRAMES - s_boot_pos : n;
+            for (int i = 0; i < m; i++) acc[i] += boot_sound_pcm[s_boot_pos + i] * s_boot_gain / 100;
+            s_boot_pos += m;
         }
         for (int i = 0; i < n; i++) {
             int32_t v = acc[i];

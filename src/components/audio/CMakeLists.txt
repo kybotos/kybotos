@@ -1,7 +1,7 @@
 idf_component_register(
-    SRCS "audio.cpp"
+    SRCS "audio.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/boot_sound.c"
     INCLUDE_DIRS "." "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared"
     REQUIRES driver vfs freertos chmorgan__esp-audio-player
     PRIV_REQUIRES board seq
 )
-target_compile_options(${COMPONENT_LIB} PRIVATE -std=gnu++17)
+target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>)

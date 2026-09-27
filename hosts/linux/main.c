@@ -315,6 +315,7 @@ static bool show_splash(void)
     host_sdl_image_rgb565((320 - SPLASH_LOGO_W) / 2, (240 - SPLASH_LOGO_H) / 2,
                           SPLASH_LOGO_W, SPLASH_LOGO_H, splash_logo_rgb565);
     host_sdl_present();
+    host_sdl_play_boot_sound(); /* Phase 22a 追記: 起動音(0.64 秒。スプラッシュの間に鳴り終わる) */
 
     const Uint32 until = SDL_GetTicks() + SPLASH_MIN_MS;
     while ((Sint32)(SDL_GetTicks() - until) < 0) {

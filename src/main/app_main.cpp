@@ -63,6 +63,8 @@ extern "C" void app_main()
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (int)(heap_before_audio
                    - heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    // 起動音(Phase 22a 追記)。スプラッシュを出した直後。ミキサタスクが鳴らすのでここは待たない
+    audio::Play_Boot_Sound();
 
     // MIDI OUT の常設初期化(Phase 8a で確認済みの UART1 設定。起動時1回のみ)
     midi::Midi_Init();

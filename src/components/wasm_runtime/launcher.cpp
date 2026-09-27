@@ -283,6 +283,9 @@ void launcher_show_splash()
     lv_image_set_src(img, &s_splash_dsc);
     lv_obj_center(img);
     lv_screen_load(s_splash_screen);
+    // その場で描き切ってから戻る(次の描画周期を LVGL のタスクに任せない)。直後に鳴らす
+    // 起動音より、ロゴが必ず先に出るように(Phase 22a 追記)
+    lv_refr_now(nullptr);
     lvgl_port_unlock();
     s_splash_shown_us = esp_timer_get_time();
 }

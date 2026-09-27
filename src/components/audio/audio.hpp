@@ -154,6 +154,7 @@ extern "C" {
     bool Play_Tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level); // 減衰サイン (7C)
     bool Play_Drum(uint8_t note, uint8_t velocity);  // 内蔵音源 (Phase 21)
     void Synth_Reset(void);                          // 鳴っている音を消す (Phase 21)
+    void Play_Boot_Sound(void);                      // 起動音を 1 回鳴らす(shared/boot_sound.c。Phase 22a 追記)
     void Set_Port_Gain(uint8_t mp3, uint8_t synth, uint8_t click); // ポート別ゲイン (Phase 21b)
     void Play_Music(const char* directory, const char* fileName);
     void Music_resume(void);

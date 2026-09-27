@@ -1,6 +1,7 @@
 // Includes (kept minimal since header pulls most deps)
 #include "audio.hpp"
 #include "clock_authority.hpp"
+#include "boot_sound.h"      // Phase 22a 追記: 起動音
 #include "esp_log.h"
 #include "driver/i2s_std.h"
 #include <cstring>
@@ -187,6 +188,12 @@ int s_gain_synth = 100;
 int s_gain_click = 100;
 
 bool s_mixer_suspended; // ログを状態変化のときだけ出すための記録
+
+// 起動音(Phase 22a 追記)。PCM を 1 本だけ鳴らす(ボイスとは別枠。ボイスを奪わない)。
+// 要求は atomic のフラグだけ(呼び出し側をブロックしない)。再生位置はミキサタスクだけが触る
+std::atomic<bool> s_boot_req{false};
+int s_boot_pos = BOOT_SOUND_FRAMES; // BOOT_SOUND_FRAMES = 鳴っていない
+int s_boot_gain = 0;                // マスター音量(0..100)。開始時に固定
 
 void voice_set_sine(Voice* v, float freq, int frames, float amp)
 {
@@ -412,6 +419,7 @@ void Mp3Player::ensure_click_task() noexcept {
 void Mp3Player::flush_silence() noexcept
 {
     for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) s_voices[i].kind = VK_IDLE;
+    s_boot_pos = BOOT_SOUND_FRAMES;
     if (tone_queue_) xQueueReset(tone_queue_);
     if (!tx_ || !enabled_) return;
     memset(s_chunk, 0, sizeof(s_chunk));
@@ -459,11 +467,21 @@ void Mp3Player::click_task_loop() noexcept {
             if (msg.velocity) voice_start_drum(msg.note, msg.velocity, vol);
             else              voice_start_tone(msg, vol);
         }
+        if (s_boot_req.exchange(false)) {
+            s_boot_pos = 0;
+            s_boot_gain = vol;
+        }
 
         memset(s_acc, 0, sizeof(s_acc));
         bool any = false;
         for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) {
             if (s_voices[v].kind != VK_IDLE) { voice_render(&s_voices[v], s_acc, kMixBlock); any = true; }
+        }
+        if (s_boot_pos < BOOT_SOUND_FRAMES) {
+            const int n = (BOOT_SOUND_FRAMES - s_boot_pos < kMixBlock) ? BOOT_SOUND_FRAMES - s_boot_pos : kMixBlock;
+            for (int i = 0; i < n; i++) s_acc[i] += boot_sound_pcm[s_boot_pos + i] * s_boot_gain / 100;
+            s_boot_pos += n;
+            any = true;
         }
         if (any) {
             for (int i = 0; i < kMixBlock; i++) {
@@ -736,6 +754,10 @@ extern "C" bool Play_Tone(uint16_t freq_hz, uint16_t dur_ms, uint8_t level) {
 
 extern "C" bool Play_Drum(uint8_t note, uint8_t velocity) {
     return g_player && g_player->play_drum(note, velocity);
+}
+
+extern "C" void Play_Boot_Sound(void) {
+    if (g_player) s_boot_req.store(true); // ミキサタスクが次のブロックの頭で鳴らし始める
 }
 
 extern "C" void Synth_Reset(void) {
