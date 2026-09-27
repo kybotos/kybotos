@@ -24,7 +24,7 @@ docs/results/phaseXX.md    ← 調査・計画・実施記録・実測値・ト�
 
 ## ① フェーズ計画
 
-### Sequencer App(現在のトラック)
+### Sequencer App(2026-09-27 に終了)
 
 Sequencer アプリは非公開の app-sequencer で開発している(2026-09-26 に repo を分割。`docs/results/repo-split.md`)。
 **アプリ側の計画と記録は app-sequencer にあり、この表はプラットフォーム(Host API・ホスト・ランタイム・SDK・検証基盤)側の変更だけを残す。**
@@ -50,7 +50,16 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 | **21d** | Drum クリップのバンク化 | **done**(2026-09-23) | **非公開**(アプリ側の記録は非公開の app-sequencer)。プラットフォーム側: スロット拡張、プール 144KB、**検証スクリプトの整備**。`docs/results/phase16-21-platform.md` | 21c |
 | **21e** | Chapter の Drum 列と Song 再生 | **done**(2026-09-23) | **非公開**(アプリ側の記録は非公開の app-sequencer)。プラットフォーム側: rect スロット 80、プール 176KB、**内蔵音源の遅延の測定(U-22)**。`docs/results/phase16-21-platform.md` | 21d |
 | **21f** | Chapter のグリッドから再生 | **done**(2026-09-23) | **非公開**(アプリ側の記録は非公開の app-sequencer)。プラットフォーム側: Linux の記号の追加のみ。`docs/results/phase16-21-platform.md` | 21e |
-| 22〜 | **Phase 21 の後**(プラットフォーム側): **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27)。Sequencer の次の機能の計画は非公開の app-sequencer 側 | deferred | — | 21f |
+| (以後) | **Sequencer トラックはここで終了**(2026-09-27、ユーザー判断)。Sequencer の次の機能の計画は非公開の app-sequencer 側。プラットフォームの計画は下の Platform トラック | done | — | 21f |
+
+### Platform(現在のトラック)
+
+Host API・ホスト・ランタイム・SDK・検証基盤のフェーズ。**Sequencer とは独立**に進める(2026-09-27 から)。
+
+| Phase | 目的 | 状態 | 完了条件の要点 | 依存 |
+|---|---|---|---|---|
+| **22** | **回帰アプリの統合と、タップの自動化**。回帰を **metronome / mp3player + Host API の検査アプリ 1 本**にまとめ、検査用・診断用アプリ(midi_loopback / synth_probe / 検査アプリ)は**既定のファームに埋め込まない**(ビルドのオプションで入れる)。**touch_demo は削除、seq_smoke は検査アプリに吸収**。**実機はシリアルから、Linux はホストのコマンドの入口から**タップ / キーを注入し、**画面の文字を読み出して判定**する | planned | 3 本が実機・Linux とも**タップを含めて人手なしで PASS**、検査アプリの合否を機械判定、既定のランチャーには実用アプリだけ、**Host API / ABI 不変**・metronome / mp3player の highmark 不変、所要時間を統合前後で実測。`docs/prompts/phase22.md` | 21f |
+| 23〜 | 候補: **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27) | deferred | — | 22 |
 
 ### 完了したフェーズ(要約)
 
@@ -73,6 +82,7 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 
 | 日付 | 変更 |
 |---|---|
+| 2026-09-27 | **Sequencer トラックを終了し、Platform トラックに切り替えた**(ユーザー判断。Sequencer とは独立に進める)。**Phase 22(回帰アプリの統合と、タップの自動化)の指示書を作成した**(`docs/prompts/phase22.md`)。ユーザーの決定: (a) 回帰は**実用アプリ(metronome / mp3player)の起動と操作 + Host API をある程度網羅する検査アプリ**、目的は**回帰時間の短縮と実機で実用アプリを目立たせること**、(b) 検査用・診断用アプリは**既定のファームに埋め込まない**(ランチャーに出さない印を付ける方式は採らない)、(c) **touch_demo は削除**、(d) **Linux もタップを自動化する**(workflow §1-8 の見直し。文面はステップ 0 で承認)。旧「22〜」の候補(U-22 の対策、U-26、U-27)は 23〜 へ |
 | 2026-09-26 | **旧名 MidiAppBox を Kybotos に改名した**(`kybotos_host`、`KYBOTOS_*`、`CONFIG_KYBOTOS_*`、`kybotos.bin`、`KBCMD`、コンテナの `/workspaces/kybotos`。`docs/results/publish-prep.md` の追記)。記録と履歴は旧名のまま |
 | 2026-09-26 | **公開の準備**(`docs/results/publish-prep.md`): ライセンスを Apache-2.0 に、README を Kybotos として書き直し、CI をこの repo のビルドに直した(release は外した)。個人の運用の記述(連載記事の運用、出展予定)を外し、**マイルストーンの節を削除**した |
 | 2026-09-26 | **repo を分割し、Sequencer を非公開の app-sequencer へ移した**(`docs/results/repo-split.md`)。Sequencer トラックの表は**プラットフォーム側の変更だけ**に縮め(アプリ側の計画と記録は app-sequencer)、21f を done にした。**回帰は 5 本に戻した**。ファームへの埋め込みを表から回す形にし、この repo の外のアプリを `KYBOTOS_EXTRA_APPS` で載せられるようにした。Sequencer だけの課題 U-19 / U-20 / U-28 は app-sequencer へ移した。**U-29 を起票し、同日クローズ**(`src/dependencies.lock` をコミットして managed component の版を固定した。ユーザー判断)。以下の行の「(非公開)」のファイルは app-sequencer にある |
