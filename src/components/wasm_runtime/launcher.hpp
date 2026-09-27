@@ -14,9 +14,13 @@ constexpr const char* kAppsDir = "/sdcard/apps";
 // FATFS を使うため十分なスタック(8KB 以上)のタスクから呼ぶこと。
 bool launcher_prepare_sd(char* status, size_t status_len);
 
+// 起動時のスプラッシュ(ロゴ)を表示する(Phase 22a)。LVGL の開始後に 1 回だけ呼ぶ。
+// 最初の launcher_show が、表示から最短 1.5 秒待ってメニューに切り替え、スプラッシュを消す。
+void launcher_show_splash();
+
 // メニュー画面を(初回は作成して)表示する。kAppsDir を再スキャンして
-// .wasm の一覧を出す。status_msg は状態行に表示(nullptr なら変更しない)。
-// lvgl_port_lock を取るのでどのタスクからでも呼べる。
+// .wasm の一覧を(拡張子を取った名前で)出す。status_msg は状態行に表示(nullptr なら変更しない)。
+// lvgl_port_lock を取るのでどのタスクからでも呼べる。スプラッシュが出ていればその残り時間だけ待つ。
 void launcher_show(const char* status_msg);
 
 // 名前(拡張子なし可)で kAppsDir 内のアプリを起動する。メニューのタップを

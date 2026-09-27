@@ -1170,6 +1170,20 @@ void host_sdl_text(int x, int y, const char* s, uint32_t rgb888)
     draw_string(x, y, s, rgb888);
 }
 
+void host_sdl_image_rgb565(int x, int y, int w, int h, const uint16_t* px)
+{
+    SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(
+        (void*)px, w, h, 16, w * 2, SDL_PIXELFORMAT_RGB565);
+    if (!surf) return;
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(s_renderer, surf);
+    if (tex) {
+        SDL_Rect dst = { x, y, w, h };
+        SDL_RenderCopy(s_renderer, tex, NULL, &dst);
+        SDL_DestroyTexture(tex);
+    }
+    SDL_FreeSurface(surf);
+}
+
 void host_sdl_present(void)
 {
     SDL_RenderPresent(s_renderer);

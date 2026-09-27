@@ -71,7 +71,8 @@ endif()
 # ---- host executable ----
 add_executable(kybotos_host main.c cmd_fifo.c hostapi_sdl.c hostapi_midi.c hostapi_seq.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/seq_core.c
-               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c)
+               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c
+               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/splash_logo.c)
 target_include_directories(kybotos_host PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared

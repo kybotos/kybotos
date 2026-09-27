@@ -48,6 +48,8 @@ extern "C" void app_main()
     disp.start_lvgl();
     static Touch touch;
     touch.init(disp.lvgl_get_disp());
+    // 起動時のスプラッシュ(Phase 22a)。以降の初期化と SD の準備の間、ロゴを出しておく
+    wasmrt::launcher_show_splash();
 
     // Clock Authority(Phase 11)。I2S 初期化より前にアンカーを初期化しておく
     clockauth::Init();
@@ -108,10 +110,12 @@ extern "C" void app_main()
             wasmrt::launcher_run_cycle_test();
         }
 #endif
-        // シリアルコマンド(回帰自動化用)。ls / run が SD を見るのでこの位置。
-        serialcmd::Init();
-        // 失敗時もメニューは出す(エラー表示付き・空リスト)
+        // 失敗時もメニューは出す(エラー表示付き・空リスト)。スプラッシュの残り時間を待ってから切り替える
         wasmrt::launcher_show(status);
+        // シリアルコマンド(回帰自動化用)。ls / run が SD を見るのでこの位置。
+        // メニューを出した後に開く(スプラッシュの待ちの間に run が来て、アプリの画面を
+        // メニューが上書きしないように。Phase 22a)
+        serialcmd::Init();
         vTaskDelete(nullptr);
     };
     xTaskCreate(boot_task, "wasm_boot", 8192, nullptr, 4, nullptr);

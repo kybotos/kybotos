@@ -15,6 +15,7 @@ cmake -B build
 cmake --build build -j
 
 # ランチャーモード(既定: ../../wasm-apps をスキャン。サブディレクトリ 1 段も検索)
+# 起動時にロゴ(docs/images/kybotos.png)を 1.5 秒出してからメニュー。メニューにはアプリ名を拡張子なしで出す(Phase 22a)
 ./build/kybotos_host
 ./build/kybotos_host <appsディレクトリ>
 ./build/kybotos_host ../../wasm-apps/dev     # 検査用・診断用アプリ(1 段下の dev/ は既定の一覧に出ない)

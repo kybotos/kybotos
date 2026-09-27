@@ -29,6 +29,7 @@
 #include "hostapi_midi.h"
 #include "hostapi_seq.h"
 #include "cmd_fifo.h"     /* Phase 22 */
+#include "splash_logo.h"  /* Phase 22a */
 
 #define APP_TICK_MS 100
 #define MAX_APPS 32
@@ -42,6 +43,8 @@
 #define MENU_ROW_H 20
 #define MENU_ROW_GAP 2
 #define MENU_STATUS_Y 220
+
+#define SPLASH_MIN_MS 1500 /* 起動時のスプラッシュの表示時間(Phase 22a。実機と同じ最短時間) */
 
 /* 実機は Phase 7B で 64→48KB。Linux も長く同じ 48KB にしていたが、x86_64 では WAMR の
  * 構造体(ポインタ)が大きく、同じ .wasm でもプール消費が実機より大きい。Phase 18 の
@@ -73,7 +76,10 @@ static char s_apps_dir[384] = "";
 static void add_app(const char* name, const char* path)
 {
     if (s_app_count >= MAX_APPS) return;
-    snprintf(s_apps[s_app_count].name, sizeof(s_apps[0].name), "%s", name);
+    /* メニューには拡張子 .wasm を出さない(Phase 22a。演奏者に WASM を意識させない)。
+     * 呼び出し元は has_wasm_ext を通したものだけを渡す。起動は path で行う */
+    snprintf(s_apps[s_app_count].name, sizeof(s_apps[0].name), "%.*s",
+             (int)(strlen(name) - 5), name);
     snprintf(s_apps[s_app_count].path, sizeof(s_apps[0].path), "%s", path);
     s_app_count++;
 }
@@ -126,7 +132,7 @@ static void scan_apps(const char* dir)
     qsort(s_apps, s_app_count, sizeof(AppEntry), cmp_app);
 
     if (s_app_count == 0) {
-        snprintf(s_status, sizeof(s_status), "no .wasm found in %s", dir);
+        snprintf(s_status, sizeof(s_status), "no apps found");
     } else {
         snprintf(s_status, sizeof(s_status), "%d app(s) - click to launch", s_app_count);
     }
@@ -267,12 +273,8 @@ static void app_unload(App* a, bool clean_stop)
 
 static void menu_render(int hover)
 {
-    char title[420];
-    snprintf(title, sizeof(title), "WASM Apps (%s)", s_apps_dir);
-    title[38] = '\0'; /* 320px / 8px = 40 文字まで */
-
     host_sdl_begin_frame(0x101418);
-    host_sdl_text(10, 10, title, 0xffffff);
+    host_sdl_text(10, 10, "Kybotos Menu", 0xffffff); /* Phase 22a(旧 "WASM Apps (<dir>)") */
 
     /* いちばん上に `Settings`(Phase 21b)。上端スワイプが使えない場面の受け皿 */
     host_sdl_rect(MENU_ROW_X, MENU_ROW_Y0, MENU_ROW_W, MENU_ROW_H,
@@ -301,6 +303,27 @@ static int menu_hit_test(int lx, int ly)
         if (ly >= y && ly < y + MENU_ROW_H) return i;
     }
     return -1;
+}
+
+/* ---- 起動時のスプラッシュ(Phase 22a) ---- */
+
+/* ロゴを中央に出して SPLASH_MIN_MS 待つ。その間もイベントは回す(ウィンドウを閉じたら true) */
+static bool show_splash(void)
+{
+    host_sdl_begin_frame(SPLASH_LOGO_BG_RGB888);
+    host_sdl_image_rgb565((320 - SPLASH_LOGO_W) / 2, (240 - SPLASH_LOGO_H) / 2,
+                          SPLASH_LOGO_W, SPLASH_LOGO_H, splash_logo_rgb565);
+    host_sdl_present();
+
+    const Uint32 until = SDL_GetTicks() + SPLASH_MIN_MS;
+    while ((Sint32)(SDL_GetTicks() - until) < 0) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_QUIT) return true;
+        }
+        SDL_Delay(20);
+    }
+    return false;
 }
 
 /* ---- main ---- */
@@ -360,6 +383,8 @@ int main(int argc, char** argv)
             app_running = true;
             printf("single mode: BACKSPACE = back key, ESC = force quit\n");
         } else {
+            /* ランチャーのときだけ(単発実行 = 回帰・CI では出さない) */
+            if (show_splash()) quit = true;
             scan_apps(s_apps_dir);
             printf("launcher: %s (click to launch, BACKSPACE = back, ESC = force quit)\n",
                    s_apps_dir);

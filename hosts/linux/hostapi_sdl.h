@@ -37,6 +37,8 @@ void host_sdl_begin_frame(uint32_t rgb888);
 void host_sdl_rect(int x, int y, int w, int h, uint32_t rgb888);
 void host_sdl_text(int x, int y, const char* s, uint32_t rgb888);
 void host_sdl_present(void);
+/* RGB565(ホストのバイト順)の画像を論理座標に貼る(Phase 22a: 起動時のスプラッシュ) */
+void host_sdl_image_rgb565(int x, int y, int w, int h, const uint16_t* px);
 
 /* ウィンドウ座標 → 論理座標(320x240)変換(マウスイベント用) */
 void host_sdl_window_to_logical(int wx, int wy, int* lx, int* ly);

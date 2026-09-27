@@ -4,12 +4,14 @@
 #include "hostapi.hpp"
 #include "screensaver.hpp"
 #include "embedded_apps.h"
+#include "splash_logo.h"
 
 #include "sdcard.hpp"
 #include "audio.hpp"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
@@ -39,6 +41,12 @@ bool s_mounted = false;
 lv_obj_t* s_menu_screen = nullptr;
 lv_obj_t* s_list_cont = nullptr;
 lv_obj_t* s_status_lbl = nullptr;
+
+// 起動時のスプラッシュ(Phase 22a)。メニューを初めて出すときに消す
+constexpr int64_t kSplashMinUs = 1500 * 1000;
+lv_obj_t* s_splash_screen = nullptr;
+int64_t s_splash_shown_us = 0;
+lv_image_dsc_t s_splash_dsc;
 
 // path が無い、または内容が埋め込みバイナリと異なれば書き込む
 // (サンプルアプリの更新をファーム更新に追従させる。同名以外のファイルには触れない)
@@ -97,10 +105,10 @@ void row_event_cb(lv_event_t* e)
 {
     lv_obj_t* row = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_t* label = lv_obj_get_child(row, 0);
-    const char* name = lv_label_get_text(label);
+    const char* name = lv_label_get_text(label); // 拡張子を取った名前(Phase 22a)
 
     char path[96];
-    snprintf(path, sizeof(path), "%s/%s", wasmrt::kAppsDir, name);
+    snprintf(path, sizeof(path), "%s/%s.wasm", wasmrt::kAppsDir, name);
     ESP_LOGI(TAG, "launch: %s", path);
 
     wasmrt::hostapi_app_screen_create();
@@ -120,7 +128,7 @@ void create_menu_locked()
     lv_obj_set_style_bg_color(s_menu_screen, lv_color_hex(0x101418), 0);
 
     lv_obj_t* title = lv_label_create(s_menu_screen);
-    lv_label_set_text(title, "WASM Apps (/sdcard/apps)");
+    lv_label_set_text(title, "Kybotos Menu");
     lv_obj_set_style_text_color(title, lv_color_white(), 0);
     lv_obj_set_pos(title, 10, 8);
 
@@ -173,8 +181,11 @@ void rebuild_list_locked()
         lv_obj_t* row = lv_button_create(s_list_cont);
         lv_obj_set_width(row, lv_pct(100));
         lv_obj_set_style_bg_color(row, lv_color_hex(0x2a3340), 0);
+        // 演奏者に WASM を意識させないので拡張子を出さない(Phase 22a)。起動時に付け直す
+        char stem[64];
+        snprintf(stem, sizeof(stem), "%.*s", (int)(strlen(ent->d_name) - 5), ent->d_name);
         lv_obj_t* label = lv_label_create(row);
-        lv_label_set_text(label, ent->d_name);
+        lv_label_set_text(label, stem);
         lv_obj_center(label);
         lv_obj_add_event_cb(row, row_event_cb, LV_EVENT_CLICKED, nullptr);
         count++;
@@ -182,7 +193,7 @@ void rebuild_list_locked()
     closedir(dir);
 
     if (count == 0) {
-        lv_label_set_text(s_status_lbl, "no .wasm files in /sdcard/apps");
+        lv_label_set_text(s_status_lbl, "no apps found");
     }
     ESP_LOGI(TAG, "menu: %d app(s) listed", count);
 }
@@ -244,14 +255,47 @@ bool launcher_prepare_sd(char* status, size_t status_len)
     return true;
 }
 
+void launcher_show_splash()
+{
+    s_splash_dsc = {};
+    s_splash_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    s_splash_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    s_splash_dsc.header.w = SPLASH_LOGO_W;
+    s_splash_dsc.header.h = SPLASH_LOGO_H;
+    s_splash_dsc.header.stride = SPLASH_LOGO_W * 2;
+    s_splash_dsc.data_size = sizeof(splash_logo_rgb565);
+    s_splash_dsc.data = (const uint8_t*)splash_logo_rgb565; // flash のまま描く(コピーしない)
+
+    lvgl_port_lock(0);
+    s_splash_screen = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(s_splash_screen, lv_color_hex(SPLASH_LOGO_BG_RGB888), 0);
+    lv_obj_remove_flag(s_splash_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* img = lv_image_create(s_splash_screen);
+    lv_image_set_src(img, &s_splash_dsc);
+    lv_obj_center(img);
+    lv_screen_load(s_splash_screen);
+    lvgl_port_unlock();
+    s_splash_shown_us = esp_timer_get_time();
+}
+
 void launcher_show(const char* status_msg)
 {
+    // 起動直後だけ: スプラッシュを最短時間は見せる(SD の準備と重ねた残りを待つ)
+    if (s_splash_screen) {
+        const int64_t left_us = kSplashMinUs - (esp_timer_get_time() - s_splash_shown_us);
+        if (left_us > 0) vTaskDelay(pdMS_TO_TICKS(left_us / 1000));
+    }
+
     lvgl_port_lock(0);
     if (!s_menu_screen) create_menu_locked();
     rebuild_list_locked();
     // 呼び出し元のメッセージを優先(再スキャンの汎用メッセージより後に設定)
     if (status_msg) lv_label_set_text(s_status_lbl, status_msg);
     lv_screen_load(s_menu_screen);
+    if (s_splash_screen) {
+        lv_obj_delete(s_splash_screen); // 一度きり。以後の launcher_show は待たない
+        s_splash_screen = nullptr;
+    }
     screensaver_wake_locked();   // 消灯中に戻ってきても必ず点灯・無操作時間リセット
     lvgl_port_unlock();
 }

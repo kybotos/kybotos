@@ -62,6 +62,7 @@ idf_component_register(
     SRCS "wasm_runtime.cpp" "hostapi.cpp" "launcher.cpp" "screensaver.cpp"
          "${_gen}"
          "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/master_ui.c"
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/splash_logo.c"
     INCLUDE_DIRS "."
     EMBED_FILES
         ${_apps}
