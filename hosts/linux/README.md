@@ -17,9 +17,15 @@ cmake --build build -j
 # ランチャーモード(既定: ../../wasm-apps をスキャン。サブディレクトリ 1 段も検索)
 ./build/kybotos_host
 ./build/kybotos_host <appsディレクトリ>
+./build/kybotos_host ../../wasm-apps/dev     # 検査用・診断用アプリ(1 段下の dev/ は既定の一覧に出ない)
 
 # 単発実行モード(メニューなし。CI スモーク用)
-./build/kybotos_host ../../wasm-apps/touch_demo/touch_demo.wasm
+./build/kybotos_host ../../wasm-apps/metronome/metronome.wasm
+
+# コマンドの入口つき(Phase 22。回帰と scripts/ui-linux.sh が使う。語彙は実機のシリアルコンソールと同じ)
+mkfifo /tmp/kb.fifo
+KYBOTOS_CMD_FIFO=/tmp/kb.fifo ./build/kybotos_host ../../wasm-apps/metronome/metronome.wasm &
+echo "tap 281 202" > /tmp/kb.fifo; echo texts > /tmp/kb.fifo; echo stop > /tmp/kb.fifo   # 応答は stdout の "CMD: ..."
 ```
 
 - 描画: SDL2 ウィンドウ(実機と同じランドスケープ 320x240 の 2 倍拡大)

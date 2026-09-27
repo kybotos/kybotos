@@ -43,7 +43,12 @@ docker run --rm -it -v ${PWD}:/workspaces/kybotos -w /workspaces/kybotos/src \
 
 - The versions of the managed components are pinned in `src/dependencies.lock`. Memory on the ESP32-S3 is tight,
   so upgrading them means re-taking the regression baselines (`docs/workflow.md` §3.2).
-- On first boot, the sample apps embedded in the firmware are copied to `/sdcard/apps` on the SD card and listed in the launcher.
+- On first boot, the apps embedded in the firmware (metronome and mp3player) are copied to `/sdcard/apps` on the SD card and
+  listed in the launcher. The test and diagnostic apps in `wasm-apps/dev/` are embedded only when you build with
+  `idf.py -DKYBOTOS_DEV_APPS=ON build` (used for the regression).
+- The firmware never deletes apps from the SD card. If you update from an older firmware, apps it placed there
+  (touch_demo, seq_smoke, midi_loopback, synth_probe) stay in the launcher; remove them with `rm <app>` on the serial
+  console (`idf.py monitor`, then type `rm touch_demo`).
 
 ## Linux host
 
@@ -68,8 +73,10 @@ See `hosts/linux/README.md` for details.
 
 ## Regression
 
-Five sample apps (touch_demo / mp3player / metronome / midi_loopback / seq_smoke) are started and stopped on the device and
-on the Linux host, and heap deltas, warnings and WAMR memory usage are checked automatically
+Three apps are run on the device and on the Linux host: metronome and mp3player, and hostapi_check
+(`wasm-apps/dev/`), which exercises the Host API and shows its verdict on screen. Scripted taps are injected through
+the device's serial console and the Linux host's command FIFO, and the text on screen is read back to check each step.
+Heap deltas, warnings and WAMR memory usage are checked as well
 (`scripts/device-regress.sh` / `scripts/linux-regress.sh`; procedure in `docs/workflow.md`).
 
 ## License

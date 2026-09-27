@@ -41,7 +41,10 @@ docker run --rm -it -v ${PWD}:/workspaces/kybotos -w /workspaces/kybotos/src \
 
 - 使う部品(managed component)の版は `src/dependencies.lock` で固定しています。ESP32-S3 はメモリに余裕が少ないので、
   版を上げるときは回帰で基準値を取り直します(`docs/workflow.md` §3.2)。
-- 初回の起動で、ファームに埋め込んだサンプルアプリが SD カードの `/sdcard/apps` に置かれ、ランチャーに並びます。
+- 初回の起動で、ファームに埋め込んだアプリ(metronome と mp3player)が SD カードの `/sdcard/apps` に置かれ、ランチャーに並びます。
+  `wasm-apps/dev/` の検査用・診断用アプリは、`idf.py -DKYBOTOS_DEV_APPS=ON build` でビルドしたときだけ入ります(回帰に使います)。
+- ファームは SD のアプリを消しません。古いファームから更新すると、それが置いたアプリ(touch_demo / seq_smoke / midi_loopback /
+  synth_probe)がランチャーに残るので、シリアルコンソール(`idf.py monitor` で `rm touch_demo` のように入力)の `rm <app>` で消してください。
 
 ## Linux ホスト
 
@@ -65,9 +68,10 @@ cmake -B build && cmake --build build -j
 
 ## 回帰
 
-サンプルアプリ 5 本(touch_demo / mp3player / metronome / midi_loopback / seq_smoke)を、実機と Linux ホストで
-起動・停止し、ヒープの差分・警告・WAMR のメモリ消費を機械的に判定します(`scripts/device-regress.sh` / `scripts/linux-regress.sh`、
-手順は `docs/workflow.md`)。
+metronome / mp3player と、Host API をひととおり叩いて合否を画面に出す検査アプリ hostapi_check(`wasm-apps/dev/`)の 3 本を、
+実機と Linux ホストで回します。タップは実機のシリアルコンソールと Linux ホストのコマンドの入口(FIFO)から注入し、画面の文字を
+読み出して手順ごとに確かめます。ヒープの差分・警告・WAMR のメモリ消費も機械的に判定します(`scripts/device-regress.sh` /
+`scripts/linux-regress.sh`、手順は `docs/workflow.md`)。
 
 ## ライセンス
 

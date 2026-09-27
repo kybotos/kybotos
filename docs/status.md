@@ -870,3 +870,20 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - **managed component の版を `src/dependencies.lock` のコミットで固定した**(LVGL 9.5.0 / esp_lvgl_port 2.8.0~1。roadmap U-29)。
     固定していなかったので、新しい clone では版が上がり(LVGL 9.6.0~1 など)、停止時の値が `free_int` −32 B /
     `largest_int` 98,304(しきい値ちょうど)になっていた。ESP32-S3 はメモリがシビアなので、他の人のビルドでも同じ版になるようにした。
+
+## 2026-09-27 時点
+
+- **Platform トラックを始めた**(Sequencer トラックは 21f で終了。`docs/roadmap.md`)。
+- **Phase 22(回帰アプリの統合と、タップの自動化)完了。** 詳細は `docs/results/phase22.md`。
+  - **回帰は 3 本**: metronome / mp3player(実用アプリの起動と操作)+ **hostapi_check**(`wasm-apps/dev/`。Host API をひととおり叩き、
+    合否を画面の最下行に出す検査アプリ。seq_smoke を吸収)。touch_demo は削除、midi_loopback / synth_probe は `wasm-apps/dev/` へ。
+  - **既定のファームには実用アプリだけが入る**(ランチャーは metronome / mp3player と、外から入れたアプリ)。検査用・診断用は
+    `idf.py -DKYBOTOS_DEV_APPS=ON build` のときだけ。回帰はこの構成(`src/build`)で回す。SD に残った古いアプリはシリアルの `rm <app>` で消す。
+  - **タップを自動化した**: 実機はシリアルコンソールの `tap` / `hold` / `drag` / `key`、Linux はホストのコマンドの入口
+    (`KYBOTOS_CMD_FIFO`)から注入し、画面の文字(`texts`)で判定する。回帰の conf にアプリごとのシナリオ(`SCENARIO`)。
+    **Linux の回帰は xdotool を使わなくなった**(workflow §1-8 を改訂)。
+  - 所要時間: **実機 147 → 45 秒**、Linux 29 秒(統合前は 27 秒だが seq_smoke の完了を待っていなかった)。
+  - 確認: 実機・Linux の回帰 PASS。metronome / mp3player の highmark は不変、Host API / ABI は不変。
+    停止時 `free_int` 150,304 / `largest_int` 98,304(`MIN_LARGEST_INT` ちょうど。据え置き)/ `free_psram` 8,136,668。
+    mp3player の 1 回目 −36 B(U-23)と hostapi_check の −176 B(U-30)は、起動後の初回だけの確保(リークではない)。
+  - 実機は既定(OFF)のファームで残してある。

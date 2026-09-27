@@ -17,7 +17,7 @@
   **特定のアプリに依存する手順・レイアウト・判断は本書に書かない。** 必要になったら
   そのアプリの仕様書(`docs/apps/<app>/`)か該当フェーズの `docs/results/` に置き、
   本書からは参照するだけにする(置き場所はその都度検討する)。
-  本書の例に出てくるアプリ名(metronome / seq_smoke 等)は、**手順を示すための具体例**であって
+  本書の例に出てくるアプリ名(metronome / hostapi_check 等)は、**手順を示すための具体例**であって
   そのアプリ固有の手順という意味ではない。
 - 役割分担: **CLAUDE.md は常時従う原則の要点、本書は herdr/hpane ワークフローの具体
   (ペイン構成・コマンド形・タイムアウト・初回セットアップ・手順)の原本**。
@@ -51,14 +51,16 @@ docs/results/)。
    `waitfor` とログファイルで読む。monitor 再起動は既定でボードをリセットする点に注意。
 7. **タイムアウトは §6.2 の既定値表に従う**。超過時は勝手に次へ進まず、
    `read` でログ確認 → 報告して停止。
-8. **実機のタッチ操作はユーザーに物理操作を依頼する**(プログラム注入経路なし)。
-   Linux ホストの UI クリック自動化(xdotool のマウスクリック)は信頼できないため
-   使わない。ランチャー操作が不要なら単発実行モードで回避する。
-   Linux ホスト(SDL ウィンドウ)の画面キャプチャは `scripts/screen-still.sh` /
-   `screen-rec.sh` で取れる(Phase 18。ウィンドウ ID を指定する `import -window` / `xwd -id`。
-   x11grab は画面全体を読むのでこの環境では黒くなり、使わない)。キャプチャでクリックの
-   届き先を確かめられるようになったので、Phase 18 では xdotool のクリック + キャプチャで
-   画面遷移を確認した(承認済みの設計。本項の「使わない」の見直しは別途承認を得る)。
+8. **UI の操作は、実機・Linux ともホストのコマンドの入口から注入する**(実機 = シリアルコンソールの
+   `tap` / `hold` / `drag` / `key`、Linux = `KYBOTOS_CMD_FIFO`。§3.4 / §3.7)。**判定は画面の文字(`texts`)と
+   ログで行う**(画像の比較はしない)。xdotool のクリック(`scripts/ui-linux.sh` の FIFO を使わない経路)は
+   **手動の確認と撮影のときだけ**使い、回帰には使わない(合成クリックはボタンマスクが立たない、ドラッグは
+   原点の較正が要りユーザーのマウスと干渉する。`docs/lessons.md` Phase 21b)。
+   **音と見た目の最終確認は人間**(§3.3 のカメラ + 人間の操作)。
+   Linux ホスト(SDL ウィンドウ)の画面キャプチャは `scripts/screen-still.sh` / `screen-rec.sh`
+   (Phase 18。ウィンドウ単位の `import -window` / `xwd -id`。x11grab は画面全体を読むのでこの環境では黒くなり、使わない)。
+   (Phase 22 でユーザー承認のうえ改訂。それまでは「実機のタッチはユーザーに依頼する(注入経路なし)、
+   Linux の xdotool のクリックは信頼できないので使わない」だった。経緯は `docs/results/phase22.md`)
 9. **キャプチャ出力は `captures/<タスク名>/`**(.gitignore 対象)。
 10. `.claude/settings.local.json` の permissions 追記が必要になったら、
     内容を提示してユーザーに依頼する(勝手に権限前提の手順へ変えない)。
@@ -278,9 +280,10 @@ pgrep -af kybotos_host                          # 残留なしを確認(何も�
 ./scripts/hpane.sh send camera "./scripts/cam-rec.sh captures/<タスク名>"
 ```
 
-→ ユーザーに具体的な手順を提示して物理操作を依頼する
-(例: 「ランチャーから metronome をタップ → START → 数秒後 STOP → 終了」)。
-完了の返答を**待ってから**次へ進む。
+→ 操作は**シリアルコンソールから注入してよい**(Phase 22。`run metronome` → `tap 281 202` → 数秒 → `tap 281 202` → `stop`。
+コマンドは §3.4)。**判断(音・見た目)はユーザーに依頼する**。指そのものの操作感(的の大きさ、押しやすさ)を見たいときは、
+ユーザーに具体的な手順を提示して物理操作を依頼する(例: 「ランチャーから metronome をタップ → START → 数秒後 STOP → 終了」)。
+依頼したときは完了の返答を**待ってから**次へ進む。
 
 ```bash
 # 録画停止(空文字送信 = Enter)
@@ -299,33 +302,70 @@ pgrep -af kybotos_host                          # 残留なしを確認(何も�
   併せて `-thread_queue_size`/`-timestamps abs` も維持(キュー詰まり回避・両入力の
   時刻系統一)。
 
-### 3.4 実機の自動回帰(heap・警告の機械判定)
+### 3.4 実機の自動回帰(heap・警告・画面の機械判定)
 
-`scripts/device-regress.sh` が、残したアプリを順に
-「`run` → 起動待ち → 一定時間保持 → `stop` → 停止待ち」で回し、free heap /
-largest free block / WARN・ERROR を集計して Markdown の表と合否を出す。
+`scripts/device-regress.sh` が、conf の `APPS` を順に
+「`run` → 起動待ち → **シナリオ**(無ければ一定時間保持)→ `stop` → 停止待ち」で回し、free heap /
+largest free block / WARN・ERROR / シナリオの合否を集計して Markdown の表と合否を出す。
 **ユーザーの物理操作は不要。**
 
+**回帰の対象は 3 本**(Phase 22): **metronome / mp3player**(実用アプリの起動と操作)+ **hostapi_check**
+(`wasm-apps/dev/`。Host API をひととおり叩く検査アプリで、合否を画面の最下行 `RESULT ...` に出す)。
+**hostapi_check は検査用・診断用アプリなので既定のファームに入っていない。回帰に使うファームは `KYBOTOS_DEV_APPS=ON` でビルドする**
+(`src/build` を一度この構成にすればキャッシュに残る。CI と配布用は OFF):
+
 ```bash
-# ファームウェアは CONFIG_KYBOTOS_SERIAL_CMD=y(既定)でビルド・フラッシュ済みのこと
+# ファームウェアは CONFIG_KYBOTOS_SERIAL_CMD=y(既定)・KYBOTOS_DEV_APPS=ON でビルド・フラッシュ済みのこと
+./scripts/hpane.sh run esp32-build \
+  "docker run --rm -v <repo>:/workspaces/kybotos -w /workspaces/kybotos/src <§3.2 のイメージ> \
+   bash -c 'source /opt/esp-idf/export.sh && idf.py -DKYBOTOS_DEV_APPS=ON build'" 1800000
 ./scripts/device-regress.sh --task <タスク名>
 # → captures/<タスク名>/monitor.log と report.md。exit 0 が合格
 ```
 
+- **最初に `ls` で `APPS` がすべて SD にあるかを確かめる**。無ければ「`KYBOTOS_DEV_APPS=ON` のファームか」を案内して止まる。
+- **ON のファームを焼くと検査用・診断用アプリが SD に置かれ、OFF のファームに戻しても残る**(ファームは SD のアプリを消さない)。
+  普段使いの OFF に戻したら、シリアルの **`rm <app>`** で消す(hostapi_check / midi_loopback / synth_probe)。
+
+**シナリオ**(Phase 22): conf の `SCENARIO[<app>]` に `;` 区切りで書く。実行部は `scripts/regress-scenario.sh`
+(Linux の回帰と共通)。座標はアプリの論理座標(320×240)で、**アプリのレイアウトに依存する**(conf の該当行に前提を書いてある)。
+
+| 手順 | 意味 |
+|---|---|
+| `wait S` | S 秒待つ |
+| `tap X Y` / `hold X Y MS` / `drag X Y DX DY MS` | タッチを注入する(応答 `<verb> done` を待つ) |
+| `key back` | 戻るキー(実機 = 電源キー短押し、Linux = BACKSPACE) |
+| `expect[@秒] <文字列>` | `texts` を 0.5 秒ごとに取り、どれかの行が含むまで待つ(既定 5 秒)。行は `X Y RRGGBB <表示>` なので色も書ける |
+
+**シリアルコンソールのコマンド**(応答はタグ `KBCMD` のログ行。Phase 12 / Phase 22):
+
+| コマンド | 動作 |
+|---|---|
+| `ping` / `ls` / `heap` | 疎通 / SD のアプリの一覧 / heap の 6 値 |
+| `run <app>` / `stop` | 起動 / 停止(`stop idle` = アプリが動いていない) |
+| `tap X Y` / `hold X Y MS` / `drag X Y DX DY MS` | タッチの注入(`touch.cpp` の `indev_read_cb` の段。**指と同じ経路**でマスター設定の関所も通る。メニュー画面でも効く) |
+| `key back` / `key home` | 電源キーの短押し / 長押しと同じ |
+| `texts` | アプリ画面の文字スロットを `text X Y RRGGBB <文字>` で列挙(非 ASCII は `\xNN`)、最後に `texts done N` |
+| `rm <app>` | SD の `/sdcard/apps/<app>.wasm` を消す(実行中は不可) |
+
 - 対象アプリ・保持秒数・許容警告パターン・アプリごとの許容 heap 差分・下限しきい値
   (`MIN_FREE_INT` / `MIN_LARGEST_INT` / `MIN_FREE_PSRAM`。Phase 15 で「固定値一致」から改訂)・
-  **反復回数**(`REPEAT_RUNS` / `REPEAT_OVERRIDE`)は `scripts/device-regress.conf` に外出ししてある。
-- **同じアプリを N 回繰り返す**(Phase 18 で追加、既定 3 回。seq_smoke は 1 回)。
+  **反復回数**(`REPEAT_RUNS` / `REPEAT_OVERRIDE`)・**シナリオ**(`SCENARIO`)は `scripts/device-regress.conf` に外出ししてある。
+- **同じアプリを N 回繰り返す**(Phase 18 で追加、既定 3 回。mp3player と hostapi_check は 1 回。下記)。
   1 回ごとの差分 +0 に加えて、**N 回の終了時の `free_int` / `free_psram` がすべて同じ**ことを
   判定する(1 回ごとの差分が 0 でも、開始値が回を追って下がる漏れを捕まえるため)。
   表には「<アプリ> 反復 N 回」の行が出る。
-- **保持中にアプリが自分で止まると「停止しない」と判定される。** スクリプトは
-  「自分が送った `stop` の後の停止行」を待つので、それより前に止まっていると空振りする
-  (このとき `stop` の応答は `stop idle`)。**電源キーの短押しはログを出さずにアプリを止める**ので、
-  1 回の FAIL で結論を出さず、`monitor.log` の時系列(`KBCMD: stop ok` の有無)を見てから再実行する
+- **起動後の初回だけ internal が減る操作がある**(Phase 22。リークではない): **初めて MP3 を再生したとき −36 B**(U-23)、
+  **初めて書き込み用にファイルを開いたとき −176 B**(U-30)。回帰はボードをリセットしてから回すので、mp3player と hostapi_check の
+  1 回目に決まって出る。conf の `EXPECT_DELTA` に固定値で書き、この 2 本は反復しない(2 回目以降は +0 になるため)。
+  **`APPS` の順番を変えたり、前に MP3 を鳴らす・ファイルを書くアプリを足したら見直す。**
+- **保持中にアプリが自分で止まると「保持中に停止した」と判定される**(Phase 22、U-18。`stop` の応答が `stop idle`)。
+  電源キーの短押しは `app: key back -> ...` のログを出す(Phase 18a 以降)。1 回の FAIL で結論を出さず、`monitor.log` の時系列を見てから再実行する
   (Phase 18 で実際に 1 回だけ出て、再実行では再現しなかった)。
+- **ログの行は tee が書き途中のことがある**。行の後半の値を読むときは、行末まで待つ(Phase 22 で `app: stopped free_int=...` の後半が空になった。
+  スクリプトは `]` まで待つ)。
 - **実機の回帰と Linux ホストの回帰を同時に走らせない。** 実機が UM-ONE へ流した MIDI を
-  Linux ホストが受け、ドレインしないアプリ(touch_demo 等)で `midi: RX ring buffer full` が
+  Linux ホストが受け、ドレインしないアプリ(当時の touch_demo 等)で `midi: RX ring buffer full` が
   大量に出る(Phase 17。構成依存の挙動で、単独で走らせれば出ない)。
 - スクリプトは実行前に `docker ps` を見て、シリアルポートを掴んだままの
   `idf.py monitor` コンテナがあれば落とす(既知の教訓)。終了時も同様に片付ける
@@ -339,11 +379,9 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
   ./scripts/device-regress.sh --task <タスク名> --conf <外の conf> \
       --mount <外の repo>:/workspaces/<名前> --build-dir /workspaces/<名前>/build/fw
   ```
-- 実機側の受け口は USB Serial/JTAG のコマンドコンソール
-  (`ping` / `ls` / `run <app>` / `stop` / `heap`。応答はタグ `KBCMD` のログ行)。
-  **タッチ・電源キーの既存操作系は変更していない。**
-- アプリ内 UI 操作(metronome の START/STOP 等)は自動化していない。音・画面の
-  確認は §3.3 の人間操作+カメラのまま。
+- 実機側の受け口は USB Serial/JTAG のコマンドコンソール(上の表)。
+  **タッチ・電源キーの既存操作系はそのまま使える**(注入中だけ実タッチを読まない)。
+- アプリ内 UI 操作はシナリオで自動化した(Phase 22)。**音・見た目の最終確認は §3.3 の人間の確認のまま。**
 - **手で起動したモニタが残ったまま走らせない。** スクリプトはポートを掴んだコンテナを kill してから
   `esp32-monitor` ペインへ新しいモニタの起動コマンドを送るが、**ペインがまだ前のモニタに繋がっていると、
   そのコマンドが実機のシリアル入力に流れる**(実機ログに `KBCMD: err unknown command ...`、
@@ -360,7 +398,7 @@ largest free block / WARN・ERROR を集計して Markdown の表と合否を出
   ```
   **`scripts/device-regress.sh` もこの形で止める**(実行前と終了時。Phase 21e で修正。それまでは回帰のたびに clangd を落としていた)。
 - **WAMR プールの消費(`highmark`)が正しく出るのは、起動後に最初にロードしたアプリだけ**
-  (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の touch_demo しか
+  (2 回目以降は 4294967xxx の壊れた値。`docs/lessons.md` Phase 18)。回帰では最初の 1 本(Phase 22 以降は metronome)しか
   取れないので、**特定のアプリのプールの余裕を測るときは、モニタを再起動してボードをリセットし、
   `KBCMD: ready` の後にシリアルから `run <app>` を 1 回だけ送る**(Phase 21c で導入)。
   ```bash
@@ -413,10 +451,10 @@ min/mean/max・ヒストグラム・外れ値・見かけ BPM の分布・0xFA/0
   境界停止(`HOSTAPI_SEQ_OP_STOP`)や曲の長さの検証はこの 2 行で判定する。
   それ以前の集計は区間外のクロックを黙って捨てていたので、古い `.md` と比べるときは注意。
 - **記録器は測定対象を起動する前につないでおく。** `app_init` で即 `transport_start` する
-  アプリ(seq_smoke 等)は最初の 0xFA を取り逃がしうる(`--wait` を付けても、ポートが現れてから
+  アプリ(hostapi_check 等)は最初の 0xFA を取り逃がしうる(`--wait` を付けても、ポートが現れてから
   接続するまでの隙間で漏れる)。区間の数え方で吸収されるが、**0xFA の件数だけは実際より 1 少なく出る**。
 - **CC など データバイトまで見たいときは `aseqdump` を併走させる。** probe の CSV はイベントの種別しか
-  持たない(`aseqdump -p <ポート名>`。seq_smoke の判定値 CC#119/#120 はこれで読む)。
+  持たない(`aseqdump -p <ポート名>`。Phase 22 までの seq_smoke は判定値を CC#119/#120 で出していた)。
 - **受信側の σ で送信精度を判定しないこと。** UM-ONE 経由は USB の 1ms フレームを
   通るのでぼやける。送信側の σ は検証ビルドの送信打刻(`--txlog`)で見る。
   なお **MIDI DIN は 1 バイト 320µs** なので、それより短い受信間隔が出たら
@@ -450,75 +488,71 @@ GNOME)では常に黒くなる。**ウィンドウ ID を指定して読めば�
 - 黒画面でないことは数値で確かめられる: `convert <png> -format '%[fx:mean] %k' info:`
   (x11grab のときは平均輝度 0.0002 / 68 色、ウィンドウ指定では 0.18 / 579 色だった)。
 
-**クリックで画面遷移を確認する場合**(Phase 18 で実施):
-§1-8 の「クリックは信頼できないので使わない」は不変条件として残してあるが、
-**キャプチャで届き先を毎回確かめながら**なら画面遷移の確認に使える(Phase 18 では全クリックが
-意図どおり届いた)。座標は **論理座標 ×2**(`hostapi_sdl.c` の `WINDOW_SCALE`)。
+**UI を操作しながら撮る場合**(Phase 22 で改訂): **ホストをコマンドの入口つきで起動し、`scripts/ui-linux.sh` で操作する**。
+`KYBOTOS_CMD_FIFO` が FIFO を指していれば、`ui-linux.sh` の tap / hold / drag / key はそちらへ流れる(xdotool を使わない。
+回帰と同じ経路で、ユーザーのマウスとも干渉しない)。**画面の文字は FIFO に `texts` を書けばホストのログに出る**(`CMD: text X Y RRGGBB <文字>`)。
 
 ```bash
-pid=$(pgrep -x kybotos_host | head -1)
-for w in $(DISPLAY=:0 xdotool search --name "Kybotos host"); do
-  [ "$(DISPLAY=:0 xdotool getwindowpid "$w")" = "$pid" ] && WIN=$w
-done
-DISPLAY=:0 xdotool mousemove --window "$WIN" <論理x*2> <論理y*2>; sleep 0.3
-DISPLAY=:0 xdotool click --window "$WIN" 1
-./scripts/screen-still.sh captures/<タスク名> <名前>   # 届いたかを撮って確かめる
+export KYBOTOS_CMD_FIFO=<repo>/captures/<タスク名>/cmd.fifo; mkfifo "$KYBOTOS_CMD_FIFO"
+(cd <repo>/hosts/linux && exec ./build/kybotos_host <app.wasm> > <repo>/captures/<タスク名>/host.log 2>&1) &
+exec 3<>"$KYBOTOS_CMD_FIFO"                  # 書き手を開いておく(読み書き両用なら固まらない)
+./scripts/ui-linux.sh tap 100 168
+UI_CAPTURE_DIR=captures/<タスク名> ./scripts/ui-linux.sh shot <名前>
+echo texts >&3; echo stop >&3                # 画面の文字をログへ / 終了(ESC と同じ)
 ```
+
+`KYBOTOS_CMD_FIFO` を指定しなければ、`ui-linux.sh` は従来どおり xdotool で操作する(Phase 18〜21 のやり方。座標は **論理座標 ×2**
+(`hostapi_sdl.c` の `WINDOW_SCALE`)、ウィンドウは `kybotos_host` の pid と一致するもの)。**手動の確認用で、回帰には使わない**(§1-8)。
 
 - 撮影のタイミングを ms で待つときは `sleep "$(printf '%d.%03d' $((ms/1000)) $((ms%1000)))"`。
   `sleep 0.$(printf %03d $ms)` は 1,000ms を超えると桁が崩れる(Phase 18 で撮り逃した)。
-- **タップ・長押し・ドラッグ・キー・撮影は `scripts/ui-linux.sh` にまとめてある**(Phase 21d)。座標は論理座標(320×240)で渡す。
+- **タップ・長押し・ドラッグ・キー・撮影は `scripts/ui-linux.sh` にまとめてある**(Phase 21d、Phase 22 で FIFO 対応)。座標は論理座標(320×240)で渡す。
   ```bash
-  ./scripts/ui-linux.sh tap 100 168             # 合成クリック
+  ./scripts/ui-linux.sh tap 100 168             # タップ(FIFO があればそちら、無ければ合成クリック)
   ./scripts/ui-linux.sh hold 150 90 900         # 長押し(900ms 押して離す)
   ./scripts/ui-linux.sh drag 150 90 80 0 0      # 押してすぐ右へ 80px(スワイプ / 編集状態のドラッグ)
   ./scripts/ui-linux.sh drag 150 90 0 -48 900   # 長押しが成立してから上へ 48px(長押し + ドラッグ)
   UI_CAPTURE_DIR=captures/<タスク名> ./scripts/ui-linux.sh shot <名前>
   ```
-  **ドラッグは実ポインタを動かす**ので、スクリプトが毎回クライアント原点を較正してから絶対座標で動かす(`docs/lessons.md` Phase 21b)。
+  **xdotool の経路のドラッグは実ポインタを動かす**ので、スクリプトが毎回クライアント原点を較正してから絶対座標で動かす(`docs/lessons.md` Phase 21b)。
+  FIFO の経路はマウスと同じ入口へ直接注入するので、この較正は要らない。
   **点滅は 1 枚では判定できない**ので、数枚撮って同じ画素を並べる(`convert <png> -format '%[pixel:p{x,y}]' info:`)。
 
-### 3.7 Linux ホストの回帰(5 本)(Phase 20 で明文化)
+### 3.7 Linux ホストの回帰(Phase 20 で明文化、Phase 22 で改訂)
 
 実機の自動回帰(§3.4)に対応する Linux 側。**フェーズ末に毎回やる**ので手順を固定する。
-対象は `scripts/device-regress.conf` の `APPS` と同じ 5 本
-(touch_demo / mp3player / metronome / midi_loopback / seq_smoke)。
+対象は `scripts/device-regress.conf` の `APPS` と同じ 3 本(metronome / mp3player / hostapi_check)で、**シナリオも実機と同じ**。
 この repo の外のアプリを足して回すときは、§3.4 と同じ conf を `--conf` で渡す
-(`.wasm` のパスは conf の `APP_WASM[<app>]`)。
+(`.wasm` のパスは conf の `APP_WASM[<app>]`。hostapi_check もこれで `wasm-apps/dev/` を指している)。
 
-**`scripts/linux-regress.sh <タスク名>` が以下をそのまま回す**(Phase 21d。全 PASS で exit 0、1 行 1 アプリで highmark も出す):
+**`scripts/linux-regress.sh <タスク名>` が以下をそのまま回す**(Phase 21d、Phase 22 で FIFO 方式に。全 PASS で exit 0、1 行 1 アプリで highmark と所要秒も出す):
 
 ```bash
 ./scripts/hpane.sh run unix-build "<repo>/scripts/linux-regress.sh <タスク名>" 300000
 ./scripts/hpane.sh run unix-build "<repo>/scripts/linux-regress.sh --conf <外の conf> <タスク名>" 300000   # 外のアプリを足すとき
 ```
 
-手で回すときは、各アプリについて次を順に行う:
+スクリプトがすること(手で回すときも同じ順):
 
-```bash
-# 1) 起動。**出力はログファイルへ**(ペインのスクロールバックに誤マッチさせないため)
-./scripts/hpane.sh send unix-build \
-  "cd <repo>/hosts/linux && DISPLAY=:0 ./build/kybotos_host ../../wasm-apps/<app>/<app>.wasm \
-   > <repo>/captures/<タスク名>/regress/<app>.log 2>&1"
-# 2) 起動したことは **pgrep** で確かめる(`waitfor` は前回の行に一致しうる)
-until pgrep -x kybotos_host >/dev/null; do sleep 0.25; done
-sleep 5
-# 3) pid と一致するウィンドウへ ESC(§3.1 と同じ選び方)
-DISPLAY=:0 xdotool key --window <win> Escape
-until ! pgrep -x kybotos_host >/dev/null; do sleep 0.25; done
-# 4) ログで判定
-grep -c "app started" <app>.log; grep -c "app stopped" <app>.log
-grep -cE "no free slot|WARN|ERROR" <app>.log     # 0 であること
-grep -o "highmark=[0-9]*" <app>.log | tail -1    # WAMR プール消費を記録に残す
-```
+1. **ホストを `KYBOTOS_CMD_FIFO=<FIFO>` つきで、スクリプトの子として起動する**。出力はログファイルへ(`captures/<タスク名>/regress/<app>.log`)。
+   FIFO は**読み書き両用で開いておく**(`exec 3<>fifo`。書き込み専用だと、ホストが起動に失敗したとき読み手を待って固まる)。
+2. ログに `app started` が出るのを待つ(FIFO を指定するとホストは stdout を行バッファにするので、すぐ出る)。
+3. `SCENARIO[<app>]` があればシナリオ(§3.4 の書式。応答はログの `CMD: ...` 行)、無ければ `HOLD_OVERRIDE` / `HOLD_SEC` 秒保持する。
+4. FIFO に `stop`(ESC と同じ)を書いて終了を待つ。**xdotool は使わない**(§1-8)。
+5. ログで判定する。
 
-- **合否**: `app started` と `app stopped` が各 1 回以上、**警告 0 件**、プロセスの残留なし。
+- **合否**: `app started` と `app stopped` が各 1 回以上、**警告 0 件**(`no free slot|WARN|ERROR`)、**シナリオ合格**、プロセスの残留なし。
+- **反復はしない**(Linux は heap を見ないので 1 回)。
+- **MP3 が無ければ**、実機のファームが SD に置くのと同じ 3 ファイル(`src/components/wasm_runtime/assets/*.mp3`)を
+  `hosts/linux/sdcard/music` へコピーする(`hosts/linux/sdcard/` は `.gitignore` の対象なので、新しい clone には無い)。
 - **プール消費(highmark)は毎回表に残す。** 既存アプリの値が前フェーズと変わっていなければ、
   **Host API の追加などが既存アプリに影響していない**ことの裏づけになる
-  (Phase 20 では 5 本とも 19a / 19b と 1 バイトも同じだった)。
-- **stdout をパイプに通さない**という §3.1 の注意は `waitfor` を使う場合の話で、
-  ここでは**プロセスの終了後にファイルを読む**のでリダイレクトでよい。
+  (Phase 20 では 5 本とも 19a / 19b と 1 バイトも同じだった。Phase 22 でも metronome / mp3player / midi_loopback は同じ)。
 - **実機の回帰と同時に走らせない**(§3.4。実機の MIDI をホストが受けて警告が出る)。
+
+**コマンドの入口**(`hosts/linux/cmd_fifo.c`。語彙は実機のシリアルコンソールと同じ): `ping` / `tap` / `hold` / `drag` / `key back` / `texts` / `stop`。
+応答は stdout の `CMD: ...`。main ループ(100ms 周期)の 1 周ごとに読むので、段の時刻の分解能は 100ms。アプリが動いていないときは `idle` を返す
+(Linux の回帰は単発実行なので、メニュー画面での注入は無い)。
 
 ### 3.8 音の検証(Phase 21 で追加)
 

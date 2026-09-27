@@ -42,14 +42,16 @@ ESP32-S3-Touch-LCD-2.8 (Waveshare) ベースの音楽デバイスファームウ
   各ステップの結果はログとして **docs/results/ の該当ファイル**に残すこと。
   実施記録の冒頭には対応するフェーズ指示書(docs/prompts/phaseXX.md)への参照を書く。
 - 依存追加は最小限に留める。
-- 既存アプリ(touch_demo / mp3player / metronome / midi_loopback / seq_smoke)の
-  回帰を壊さない。回帰対象は Phase 12 作業 2 で 6 本に絞り(判断根拠は
-  docs/results/phase12.md のカバレッジ表)、Phase 14 で clicktest を削除して
-  5 本になり(判断根拠は docs/results/phase14.md)、Phase 18 で sequencer を
-  足して 6 本になった。sequencer を非公開の app-sequencer へ移したので、この 5 本に
-  戻した(docs/results/repo-split.md)。この repo の外のアプリは、この repo の回帰の
-  仕組み(`scripts/device-regress.conf` を source した conf を `--conf` で渡す)に載せて
-  回す(docs/workflow.md §3.4 / §3.7)。
+- 既存アプリの回帰を壊さない。**回帰対象は 3 本: metronome / mp3player(実用アプリの起動と操作)+
+  hostapi_check(Host API の検査アプリ、`wasm-apps/dev/`)**(Phase 22。判断根拠は docs/results/phase22.md)。
+  それまでの経緯: Phase 12 作業 2 で 6 本に絞り(docs/results/phase12.md のカバレッジ表)、Phase 14 で
+  clicktest を削除して 5 本(docs/results/phase14.md)、Phase 18 で sequencer を足して 6 本、sequencer を
+  非公開の app-sequencer へ移して 5 本(docs/results/repo-split.md)、Phase 22 で touch_demo を削除・
+  seq_smoke を hostapi_check に吸収・midi_loopback を `wasm-apps/dev/` へ移して 3 本。
+  **`wasm-apps/dev/` のアプリは既定のファームに入らない**(`KYBOTOS_DEV_APPS=ON` のときだけ。回帰はこの構成で回す)。
+  回帰はアプリ内の操作(タップ)と画面の文字の確認まで自動で行う(docs/workflow.md §1-8 / §3.4 / §3.7)。
+  この repo の外のアプリは、この repo の回帰の仕組み(`scripts/device-regress.conf` を source した conf を
+  `--conf` で渡す)に載せて回す。
   (旧「MP3 デモモードで分岐」ルールは Phase 6D で解消済み。履歴は
   docs/results/phase00.md・phase06.md。)
 - **フェーズが終わったら、そのフェーズで得た内容を必要に応じて docs/workflow.md と

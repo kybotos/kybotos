@@ -474,3 +474,38 @@ ON のファームで、カメラ録画(`captures/phase22-step5/cam_rec_153847.m
 metronome の START → 5 秒 → STOP、mp3player の PLAY → 6 秒 → STOP を流した。1 秒ごとのピークでは **metronome の区間(4〜9 秒)に拍のピーク
 (−39〜−41 dBFS、暗騒音 −48〜−52)**が出ている。MP3 の区間(14〜18 秒)はピークが小さい(ミキサーの既定が Master 50 × MP3 35)。
 **最終確認はユーザーの耳**(回帰の合否には入れない)。
+
+## ステップ 6: 文書(2026-09-27)
+
+| 文書 | 変更 |
+|---|---|
+| `docs/workflow.md` | **§1-8 をステップ 0 e の文面に改訂**(ユーザー承認済み)。§3.3(操作はシリアルから注入してよい、判断は人間)、§3.4(対象 3 本、DEV_APPS のビルド、`ls` の事前確認、`rm`、シナリオの書式、コマンドの表、一度きりの確保、`stop idle`、書き途中の行)、§3.6(FIFO つきで起動して `ui-linux.sh` で操作)、§3.7(FIFO 方式に書き直し)、例示のアプリ名 |
+| `CLAUDE.md` | 回帰対象の段落を 3 本に(経緯を残す) |
+| `README.md` / `README.ja.md` | 既定のファームのアプリ、`KYBOTOS_DEV_APPS`、古いファームから更新したら `rm`、回帰の説明 |
+| `wasm-apps/README.md` | アプリ一覧(dev/ の 3 本、touch_demo / seq_smoke を削除)、dev/ のビルドと既定のファーム |
+| `hosts/linux/README.md` | 起動例(touch_demo → metronome)、`dev/` の一覧、`KYBOTOS_CMD_FIFO` |
+| `docs/lessons.md` | 「回帰の統合と UI の注入(Phase 22)」7 項目 |
+| `docs/roadmap.md` | Phase 22 を done、U-11 / U-18 クローズ、U-23 更新、U-25 追記、**U-30 / U-31 を追加**、変更履歴 |
+| `docs/status.md` | 2026-09-27 時点 |
+
+`docs/architecture.md` / `docs/hostapi.md` の touch_demo / seq_smoke / midi_loopback の記述は、移行計画や API の経緯として書かれたもの
+(当時の回帰条件)なので書き換えていない。
+
+## 完了条件の確認
+
+| # | 条件 | 結果 |
+|---|---|---|
+| 1 | 回帰が 3 本になり、実機・Linux とも 1 コマンドで、タップを含めて人手なしで PASS | ✅ `device-regress.sh`(45 秒)/ `linux-regress.sh`(29 秒) |
+| 2 | 検査アプリの合否を機械判定、わざと壊すと FAIL | ✅ `expect RESULT PASS`、壊した一時ビルドで `RESULT FAIL ton` |
+| 3 | 既定のファームのランチャーには実用アプリだけ | ✅ OFF のファーム + `rm` で Settings / sequencer / metronome / mp3player(sequencer は外から入れたアプリ) |
+| 4 | Host API / ABI 不変、metronome / mp3player の highmark 不変 | ✅(変えたのはデバッグ用の入口と、拒否したパスのログの文言だけ) |
+| 5 | 所要時間を統合前後で実測 | ✅ ステップ 5 |
+| 6 | 外のアプリを `--conf` で足す仕組みが従来どおり動く | ✅ 実機・Linux とも midi_loopback を外の conf の形で足して PASS |
+| 7 | workflow.md §1-8 を含む文書の更新 | ✅ ステップ 6 |
+
+### 申し送り
+
+- **U-30 / U-23**: 一度きりの確保の中身は未特定。回帰の値(−176 / −36)が変わったら見る。
+- **U-31**: ON ↔ OFF を行き来すると検査用アプリが SD に残る(`rm` で消す)。
+- **`MIN_LARGEST_INT` ちょうど**: 次に静的領域が増えて下回ったら、free_int の差を見てから判断する。
+- **音の最終確認**(`captures/phase22-step5/cam_rec_153847.mp4`)はユーザーに依頼する。
