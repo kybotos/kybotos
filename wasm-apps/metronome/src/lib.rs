@@ -21,6 +21,10 @@
 //     テンポマップのエントリが増えない(SEQCORE_TEMPO_MAX = 32 の枯渇を避ける)。
 //     詳細は docs/results/phase13.md のステップ 1。
 //
+// Phase 22b: Kybotos のサンプルアプリとしての統一感(Sequencer と同じヘッダ + ステータス行、▶ / ■、
+// 対話規約の BPM・拍子の変え方)と、単機能アプリとしての簡素さ(BPM と拍子を巨大な数字で)に作り直す。
+// 設計は docs/results/phase22b.md のステップ 0。配色はメニュー(shared/launcher_theme.h)に合わせ、本体は黒。
+//
 // ホスト API (module "env") のみ使用。no_std / アロケータ不要。
 #![no_std]
 
@@ -30,7 +34,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 extern "C" {
-    fn hostapi_draw_text(x: i32, y: i32, ptr: *const u8, len: u32);
+    fn hostapi_draw_text_rgb(x: i32, y: i32, ptr: *const u8, len: u32, rgb888: u32);
     fn hostapi_fill_rect(x: i32, y: i32, w: i32, h: i32, rgb888: u32);
     fn hostapi_poll_event(buf: *mut u8, buf_len: u32) -> i32;
     fn hostapi_now_ms() -> u32;
@@ -87,7 +91,33 @@ impl SeqEvent {
     }
 }
 
-// ---- レイアウト(320x240)。旧版から変更なし ----
+// ---- 配色(Phase 22b。shared/launcher_theme.h のメニューの色から。本体は焼き付きを避けて黒)----
+const HDR_BG: u32 = 0x18_3c_29; // ヘッダ: メニューの背景と同じ濃緑(MENU_BG_RGB888)
+const STA_BG: u32 = 0x0b_14_0f; // ステータス行: 黒に近い緑
+const BODY_BG: u32 = 0x00_00_00;
+const TXT_CREAM: u32 = 0xf3_f1_e4; // 題名・数字(MENU_TITLE_RGB888)
+// 状態の色は対話規約(docs/design/ui-conventions.md §4)。アプリをまたいで同じ
+const TXT_ON: u32 = 0x40_e0_70; // ▶
+const TXT_STOP: u32 = 0xf0_60_60; // ■
+const BEAT_OFF: u32 = 0x1c_26_20; // 拍の枠(消灯)
+const BEAT_ON: u32 = 0x8f_d1_8b; // 拍の枠(点灯): 若葉
+const BEAT_ACCENT: u32 = 0xf0_a0_40; // 1 拍目: 橙(ステップ 0 の D6)
+
+// ---- ヘッダ(26px)+ ステータス行(24px)。Sequencer と同じ骨格 ----
+const HDR_H: i32 = 26;
+const STA_Y: i32 = 26;
+const STA_H: i32 = 24;
+const BODY_Y: i32 = STA_Y + STA_H;
+const TITLE_X: i32 = 8;
+const TITLE_Y: i32 = 5;
+const HDR_BPM_X: i32 = 256; // ヘッダ右の `120bpm`
+const PLAY_X: i32 = 292; // ▶ / ■
+const PLAY_Y: i32 = STA_Y + 4;
+const PLAY_HIT_X: i32 = 240; // 当たり判定はステータス行の右 80px(D13)
+const SYM_PLAY: &[u8] = b"\xEF\x81\x8B"; // U+F04B ▶
+const SYM_STOP: &[u8] = b"\xEF\x81\x8D"; // U+F04D ■
+
+// ---- 本体(ステップ 2〜4 で巨大な数字と拍の枠に置き換える)----
 const LAMP_Y: i32 = 76;
 const LAMP_H: i32 = 36;
 const LAMP_W: i32 = 44;
@@ -104,7 +134,7 @@ const BTN_Y: i32 = 176;
 const BTN_H: i32 = 52;
 const BTN_W: i32 = 70;
 const BTN_XS: [i32; 4] = [12, 90, 168, 246];
-const BTN_LABELS: [&[u8]; 4] = [b"BPM-", b"BPM+", b"BEAT", b"START"];
+const BTN_LABELS: [&[u8]; 3] = [b"BPM-", b"BPM+", b"BEAT"];
 
 const BPM_MIN: u32 = 40;
 const BPM_MAX: u32 = 240;
@@ -181,8 +211,8 @@ impl Line {
         }
         self
     }
-    fn draw(&self, x: i32, y: i32) {
-        unsafe { hostapi_draw_text(x, y, self.buf.as_ptr(), self.len as u32) };
+    fn draw(&self, x: i32, y: i32, rgb: u32) {
+        unsafe { hostapi_draw_text_rgb(x, y, self.buf.as_ptr(), self.len as u32, rgb) };
     }
 }
 
@@ -324,11 +354,19 @@ fn apply_meter() {
     restart_bar();
 }
 
+fn text(x: i32, y: i32, s: &[u8], rgb: u32) {
+    unsafe { hostapi_draw_text_rgb(x, y, s.as_ptr(), s.len() as u32, rgb) };
+}
+
 fn draw_status() {
     unsafe {
+        // ヘッダ右は Sequencer と同じ `120bpm`(回帰が BPM を読む手がかりでもある。D7)
+        let mut h = Line::new();
+        h.push_u32(BPM).push(b"bpm");
+        h.draw(HDR_BPM_X, TITLE_Y, TXT_CREAM);
         let mut l = Line::new();
-        l.push(b"BPM: ").push_u32(BPM).push(b"   beats/bar: ").push_u32(SIGS[SIG_IDX]);
-        l.draw(12, 50);
+        l.push(b"beats/bar: ").push_u32(SIGS[SIG_IDX]);
+        l.draw(12, 56, TXT_CREAM);
     }
 }
 
@@ -338,11 +376,11 @@ fn draw_lamps(lit: usize) {
         for i in 0..MAX_BEATS {
             let x = LAMP_X0 + (i as i32) * (LAMP_W + LAMP_GAP);
             let color = if i >= n {
-                0x10_18_28 // 拍子の外は背景色で消す
+                BODY_BG // 拍子の外は背景色で消す
             } else if i == lit {
-                if i == 0 { 0xf0_80_20 } else { 0x30_c0_e0 } // 1 拍目はアクセント色
+                if i == 0 { BEAT_ACCENT } else { BEAT_ON }
             } else {
-                0x2a_33_40
+                BEAT_OFF
             };
             hostapi_fill_rect(x, LAMP_Y, LAMP_W, LAMP_H, color);
         }
@@ -350,25 +388,23 @@ fn draw_lamps(lit: usize) {
     }
 }
 
+/// ステータス行右の ▶ / ■(停止中は ▶ = 押すと鳴る、再生中は ■ = 押すと止まる。ui-conventions §4)
 fn draw_run_button() {
     unsafe {
-        let (label, color): (&[u8], u32) = if RUNNING {
-            (b"STOP ", 0xa0_30_30)
+        if RUNNING {
+            text(PLAY_X, PLAY_Y, SYM_STOP, TXT_STOP);
         } else {
-            (b"START", 0x20_80_40)
-        };
-        hostapi_fill_rect(BTN_XS[3], BTN_Y, BTN_W, BTN_H, color);
-        hostapi_draw_text(BTN_XS[3] + 10, BTN_Y + 16, label.as_ptr(), label.len() as u32);
+            text(PLAY_X, PLAY_Y, SYM_PLAY, TXT_ON);
+        }
     }
 }
 
 fn draw_buttons() {
-    for i in 0..3 {
+    for i in 0..BTN_LABELS.len() {
         unsafe {
-            hostapi_fill_rect(BTN_XS[i], BTN_Y, BTN_W, BTN_H, 0x20_40_a0);
-            hostapi_draw_text(BTN_XS[i] + 10, BTN_Y + 16, BTN_LABELS[i].as_ptr(),
-                              BTN_LABELS[i].len() as u32);
+            hostapi_fill_rect(BTN_XS[i], BTN_Y, BTN_W, BTN_H, 0x3e_66_48);
         }
+        text(BTN_XS[i] + 10, BTN_Y + 16, BTN_LABELS[i], TXT_CREAM);
     }
     draw_run_button();
 }
@@ -376,10 +412,9 @@ fn draw_buttons() {
 fn draw_fine_buttons() {
     for i in 0..FINE_LABELS.len() {
         unsafe {
-            hostapi_fill_rect(BTN_XS[i], FINE_Y, BTN_W, FINE_H, 0x18_50_70);
-            hostapi_draw_text(BTN_XS[i] + 24, FINE_Y + 18, FINE_LABELS[i].as_ptr(),
-                              FINE_LABELS[i].len() as u32);
+            hostapi_fill_rect(BTN_XS[i], FINE_Y, BTN_W, FINE_H, 0x24_48_3a);
         }
+        text(BTN_XS[i] + 24, FINE_Y + 18, FINE_LABELS[i], TXT_CREAM);
     }
 }
 
@@ -456,6 +491,14 @@ fn handle_tap(x: i16, y: i16) {
     let (x, y) = (x as i32, y as i32);
     let now = unsafe { hostapi_now_ms() };
 
+    // ステータス行の右 = ▶ / ■
+    if y >= STA_Y && y < STA_Y + STA_H {
+        if x >= PLAY_HIT_X {
+            toggle_run();
+        }
+        return;
+    }
+
     // -1 / +1(Phase 7D の行。V- / V+ は Phase 21c で外した)
     if y >= FINE_Y && y < FINE_Y + FINE_H {
         for i in 0..FINE_LABELS.len() {
@@ -475,7 +518,7 @@ fn handle_tap(x: i16, y: i16) {
         return;
     }
     unsafe {
-        for i in 0..4 {
+        for i in 0..BTN_LABELS.len() {
             if x >= BTN_XS[i] && x < BTN_XS[i] + BTN_W {
                 match i {
                     0 => start_repeat(-5, now),
@@ -486,7 +529,6 @@ fn handle_tap(x: i16, y: i16) {
                         draw_lamps(usize::MAX);
                         draw_status();
                     }
-                    3 => toggle_run(),
                     _ => {}
                 }
                 break;
@@ -498,10 +540,10 @@ fn handle_tap(x: i16, y: i16) {
 #[no_mangle]
 pub extern "C" fn app_init() -> i32 {
     unsafe {
-        hostapi_fill_rect(0, 0, 320, 40, 0x90_30_50); // タイトルバー
-        hostapi_fill_rect(0, 40, 320, 200, 0x10_18_28); // 背景
-        let title = b"metronome (wasm)";
-        hostapi_draw_text(12, 12, title.as_ptr(), title.len() as u32);
+        hostapi_fill_rect(0, 0, 320, HDR_H, HDR_BG);
+        hostapi_fill_rect(0, STA_Y, 320, STA_H, STA_BG);
+        hostapi_fill_rect(0, BODY_Y, 320, 240 - BODY_Y, BODY_BG);
+        text(TITLE_X, TITLE_Y, b"Metronome", TXT_CREAM);
 
         BPM = 120;
         SIG_IDX = 2;

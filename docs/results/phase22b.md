@@ -78,3 +78,25 @@
   16 拍で 1 枠 約 15〜17px になり **2 桁の拍の番号が枠に入らない**(`A4b` で `11` がはみ出している)ので、
   **9 拍以上は枠の間隔を 4 → 2px に詰め、それでも番号が枠の幅に入らないときは番号を出さない**(拍は点いている枠の位置で分かる)。
   入るかどうかは実機の Montserrat 14 の字幅で決まるので、ステップ 4 で実機とスクリーンショットで確かめる。
+
+## ステップ 1: 画面の骨格と配色
+
+- **ヘッダ(26px、濃緑 `0x183c29`)+ ステータス行(24px、`0x0b140f`)+ 黒の本体**にし、タイトルを `Metronome`(クリーム)に、
+  **START / STOP のボタンをステータス行右の ▶ / ■ に**置き換えた(当たり判定は x 240〜320。D13)。ヘッダ右に `120bpm`(D7)。
+- 拍のランプの色をステップ 0 の配色に(消灯 `0x1c2620`、点灯 若葉、1 拍目 橙)。BPM- / BPM+ / -1 / +1 / BEAT のボタンは
+  **ステップ 3 で外すまで仮に残した**(緑系に塗り替えただけ。`beats/bar: 4` の行も同じ)。
+- 文字はすべて `hostapi_draw_text_rgb` にした(色付きの文字のため。`hostapi_draw_text` は使わなくなった)。
+- 撮影用に **`scripts/metronome-shots.sh`** を足した(ホストを FIFO つきで起動し、引数の手順どおりに操作・撮影・`texts`。§3.6 の手順をまとめたもの)。
+  画面は `captures/phase22b-step1/stop.png` / `play.png`。
+- **回帰のシナリオ**(`scripts/device-regress.conf` の `SCENARIO[metronome]`)を新しい画面に合わせた:
+  `expect 120bpm; expect \xef\x81\x8b; tap 300 38; expect \xef\x81\x8d; wait 2; tap 125 202; expect 125bpm; tap 300 38; expect \xef\x81\x8b`。
+  ▶ / ■ は `texts` の `\xNN` の表記のまま `expect` で一致した(F3)。BPM+ のタップはステップ 3 で外すときに直す。
+- **Linux の回帰 3 本 PASS**(`captures/phase22b-step1-regress`):
+
+| アプリ | highmark | 前 | シナリオ |
+|---|---|---|---|
+| metronome | **23,232** | 22,952 | PASS(9 手順) |
+| mp3player | 19,112 | 19,112 | PASS |
+| hostapi_check | 34,728 | 34,728 | PASS |
+
+  metronome は `.wasm` を作り直したので変わった(+280。基準はステップ 5 で取り直す)。他の 2 本は不変。
