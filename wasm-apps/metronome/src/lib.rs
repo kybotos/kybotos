@@ -796,6 +796,19 @@ pub extern "C" fn app_tick() {
     };
     let now = unsafe { hostapi_now_ms() };
     for ev in &evs[..n.max(0) as usize] {
+        // 拍子は「離した位置」で決める。実機は前に届けた位置から 8px 動いたときだけ MOVE を届けるので、
+        // 最後の数 px は UP にしか入らないことがある(UP には最終座標が入る。shared/hostapi_defs.h)。
+        // Gesture は UP の座標を使わないので、ここで拾う(Phase 22b ステップ 5 で実機の 32px のドラッグが 1 段足りなかった)
+        unsafe {
+            let g = &*addr_of!(GESTURE);
+            if ev.ev_type == appui::EV_TOUCH_UP && EDITING && TARGET == Target::Meter
+                && (g.armed() || g.shuttling())
+            {
+                if let Some((px, py)) = g.press_pos() {
+                    drag_meter(ev.x as i32 - px, ev.y as i32 - py);
+                }
+            }
+        }
         let a = unsafe {
             (*addr_of_mut!(GESTURE)).on_event(ev.ev_type, ev.x as i32, ev.y as i32, ev.time_ms)
         };

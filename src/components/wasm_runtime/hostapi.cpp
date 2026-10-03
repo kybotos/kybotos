@@ -883,6 +883,10 @@ void hostapi_app_screen_create()
     for (auto& r : s_rects) r = RectSlot{};
     s_screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(s_screen, lv_color_black(), 0);
+    // アプリの画面は 320x240 の固定のキャンバス(Host API の座標系)。画面の外にはみ出した矩形は切るだけにする。
+    // LVGL の既定のままだと、子が外にはみ出したときにスクリーンがスクロールできるようになり、
+    // ドラッグをスクロールとして横取りする(Phase 22b。metronome の拍の枠が負の x を使って踏んだ。Linux は切るだけ)
+    lv_obj_remove_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
     // アプリ実行中のタッチはこのスクリーンで受けてイベントキューへ流す
     lv_obj_add_event_cb(s_screen, screen_input_event_cb, LV_EVENT_PRESSED, nullptr);
     lv_obj_add_event_cb(s_screen, screen_input_event_cb, LV_EVENT_RELEASED, nullptr);
