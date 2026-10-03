@@ -112,13 +112,17 @@ const STA_H: i32 = 24;
 const BODY_Y: i32 = STA_Y + STA_H;
 const TITLE_X: i32 = 8;
 const TITLE_Y: i32 = 5;
-const HDR_BPM_X: i32 = 256; // ヘッダ右の `120bpm`
+// ヘッダ右は `120bpm 4/4`(本体と同じ並び: BPM が左、拍子が右)
+const HDR_BPM_X: i32 = 200;
+const HDR_MET_X: i32 = 268;
 const PLAY_X: i32 = 292; // ▶ / ■
 const PLAY_Y: i32 = STA_Y + 4;
 const PLAY_HIT_X: i32 = 240; // 当たり判定はステータス行の右 80px(D13)
 const HINT_X: i32 = 8; // 停止中だけ出す手引き(D8)
 const HINT_Y: i32 = STA_Y + 4;
-const HDR_BPM_HIT_X: i32 = 200; // ヘッダ右の `120bpm` の長押しも BPM のシャトル(D3)
+// ヘッダの `120bpm` のドラッグも BPM のシャトル(D3)
+const HDR_BPM_HIT_X0: i32 = HDR_BPM_X - 6;
+const HDR_BPM_HIT_X1: i32 = HDR_BPM_X + 58;
 const SYM_PLAY: &[u8] = b"\xEF\x81\x8B"; // U+F04B ▶
 const SYM_STOP: &[u8] = b"\xEF\x81\x8D"; // U+F04D ■
 
@@ -137,7 +141,7 @@ const MET_DW: i32 = 30;
 const MET_DH: i32 = 46;
 const MET_T: i32 = 7;
 const MET_GAP: i32 = 6;
-const MET_LINE_X: i32 = 228;
+const MET_LINE_X: i32 = MET_X - 4;
 const MET_LINE_Y: i32 = 114;
 const MET_LINE_W: i32 = 84;
 const MET_LINE_H: i32 = 4;
@@ -159,18 +163,23 @@ const BEAT_NUM_MAX: u32 = 8;
 const BEAT_NUM_Y: i32 = BEAT_Y + 15;
 const BEAT_DIGIT_W: i32 = 8; // 番号の 1 桁の幅の目安(中央に置くため)
 
-// 本体の当たり判定: 数字の左が BPM、右が拍子(y は本体の上から拍の枠の手前まで)
-const BIG_Y1: i32 = 178;
+// 本体の当たり判定: 左が BPM、右の分数の線より上が分子、下が分母(拍の枠の高さまで含める。拍の枠に操作は無い)
 const MET_HIT_X: i32 = 215;
+const MET_HIT_SPLIT_Y: i32 = MET_LINE_Y + MET_LINE_H / 2;
 
 const BPM_MIN: u32 = 40;
 const BPM_MAX: u32 = 240;
 const NUM_MAX: u32 = 16;
 const DEN_TABLE: [u32; 4] = [2, 4, 8, 16];
-/// BPM のシャトル(長押し + 左右ドラッグ)の段階表: 変位(px)→ 速さ(bpm/秒)。Sequencer と同じ
-const SHUTTLE_STAGES: [(i32, u32); 3] = [(12, 1), (40, 4), (80, 12)];
-/// 拍子のドラッグ: この px で 1 段(位置で決まる。左右 = 分子、上へ = 細かい音価)。Sequencer と同じ
-const MET_STEP_PX: i32 = 16;
+/// BPM のシャトル(上下ドラッグ)の段階表: 変位(px)→ 速さ(bpm/秒)。上が速く。
+/// 本体の中ほどから端までは 110px 前後なので、端近くで 40→240 を 4 秒ほどで動ける速さにする(2026-10-04 の追記)
+const SHUTTLE_STAGES: [(i32, u32); 6] = [(12, 1), (30, 3), (50, 6), (70, 12), (90, 25), (110, 50)];
+/// 分子・分母のドラッグ(位置で決まる。上 = 大きく)。最初の MET_DEAD_PX は動かない(指の揺れ)
+const MET_DEAD_PX: i32 = 12;
+/// 分子はこの px で 1 段(分子は線の上にあり、上への余地が 80px ほどしかないので細かめ)
+const NUM_STEP_PX: i32 = 8;
+/// 分母はこの px で 1 段(2 / 4 / 8 / 16 の 4 段だけ)
+const DEN_STEP_PX: i32 = 20;
 /// 変更中の点滅の周期(ui-conventions §4)
 const BLINK_MS: u32 = 200;
 
@@ -185,7 +194,8 @@ static mut OFFSET: u32 = 0;
 static mut NEXT_BEAT: u32 = 0;
 // 描いてある数字と色(同じなら描き直さない)。u32::MAX = まだ描いていない
 static mut SHOWN_BPM: u32 = u32::MAX;
-static mut SHOWN_METER: u32 = u32::MAX;
+static mut SHOWN_NUM: u32 = u32::MAX;
+static mut SHOWN_DEN: u32 = u32::MAX;
 static mut SHOWN_HINT: bool = false;
 static mut LAST_BEAT_KEY: u64 = u64::MAX;
 // 描いてある拍の枠(拍数と点いている拍)。u32::MAX / usize::MAX = まだ / 消灯
@@ -203,18 +213,19 @@ static mut PENDING_OFF: usize = 0;
 enum Target {
     None,
     Bpm,
-    Meter,
+    Num,
+    Den,
     Play,
 }
 static mut GESTURE: Gesture = Gesture::new();
 /// 押したときの的(押下の位置で決まり、離すまで変わらない)
 static mut TARGET: Target = Target::None;
-/// 長押しが成立して、値を変えている最中か(点滅させる)
+/// 値を変えている最中か(ドラッグが始まったら。点滅させる)
 static mut EDITING: bool = false;
 /// シャトルの端数(mbpm)と、前回積分した時刻
 static mut SHUTTLE_ACC: i32 = 0;
 static mut SHUTTLE_LAST_MS: u32 = 0;
-/// 拍子のドラッグの起点と、ドラッグ中の値(離したときに確定する。D11)
+/// 分子・分母のドラッグの起点と、ドラッグ中の値(離したときに確定する。D11)
 static mut MET_NUM0: u32 = 4;
 static mut MET_DEN_IDX0: i32 = 1;
 static mut EDIT_NUM: u32 = 4;
@@ -419,6 +430,23 @@ fn text(x: i32, y: i32, s: &[u8], rgb: u32) {
     unsafe { hostapi_draw_text_rgb(x, y, s.as_ptr(), s.len() as u32, rgb) };
 }
 
+/// 表に出す拍子(分子・分母のドラッグ中は確定前の値)
+fn shown_meter() -> (u32, u32) {
+    unsafe {
+        if EDITING && (TARGET == Target::Num || TARGET == Target::Den) {
+            (EDIT_NUM, EDIT_DEN)
+        } else {
+            (NUM, DEN)
+        }
+    }
+}
+
+/// ヘッダの拍子と分数の線の色(分子・分母のどちらを変えていても点滅)
+fn meter_color() -> u32 {
+    let c = value_color(Target::Num);
+    if c != TXT_CREAM { c } else { value_color(Target::Den) }
+}
+
 /// 変更中の対象なら点滅色、そうでなければ通常色(ui-conventions §4: 値の変更中は文字色を黄と交互)
 fn value_color(target: Target) -> u32 {
     unsafe {
@@ -436,11 +464,16 @@ fn draw_status() {
         let mut h = Line::new();
         h.push_u32(BPM).push(b"bpm");
         h.draw(HDR_BPM_X, TITLE_Y, value_color(Target::Bpm));
+        // その左に拍子(ドラッグ中は確定前の値。回帰が拍子を読む手がかりでもある)
+        let (num, den) = shown_meter();
+        let mut m = Line::new();
+        m.push_u32(num).push(b"/").push_u32(den);
+        m.draw(HDR_MET_X, TITLE_Y, meter_color());
         // 手引きは停止中だけ(D8)。消すときは同じ座標に空文字
         let hint = !RUNNING;
         if hint != SHOWN_HINT {
             SHOWN_HINT = hint;
-            text(HINT_X, HINT_Y, if hint { b"hold + drag" } else { b"" }, TXT_HINT);
+            text(HINT_X, HINT_Y, if hint { b"drag up / down" } else { b"" }, TXT_HINT);
         }
     }
     draw_big_numbers();
@@ -510,15 +543,19 @@ fn draw_big_numbers() {
             SHOWN_BPM = key;
             draw_number(BPM_X, BPM_Y, BPM_DW, BPM_DH, BPM_T, BPM_GAP, 3, BPM, SEG_ONE_TWO, c);
         }
-        // 拍子はドラッグ中なら確定前の値を出す
-        let (num, den) = if EDITING && TARGET == Target::Meter { (EDIT_NUM, EDIT_DEN) } else { (NUM, DEN) };
-        let c = value_color(Target::Meter);
-        let key = (num * 100 + den) | (c << 8);
-        if SHOWN_METER != key {
-            SHOWN_METER = key;
-            draw_number(MET_X, MET_NUM_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, num, SEG_ONE, c);
-            hostapi_fill_rect(MET_LINE_X, MET_LINE_Y, MET_LINE_W, MET_LINE_H, c);
-            draw_number(MET_X, MET_DEN_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, den, SEG_ONE, c);
+        // 拍子はドラッグ中なら確定前の値を出す。点滅は変えている方(分子か分母)だけ
+        let (num, den) = shown_meter();
+        let cn = value_color(Target::Num);
+        let cd = value_color(Target::Den);
+        let key = num | (cn << 8);
+        if SHOWN_NUM != key {
+            SHOWN_NUM = key;
+            draw_number(MET_X, MET_NUM_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, num, SEG_ONE, cn);
+        }
+        let key = den | (cd << 8);
+        if SHOWN_DEN != key {
+            SHOWN_DEN = key;
+            draw_number(MET_X, MET_DEN_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, den, SEG_ONE, cd);
         }
     }
 }
@@ -648,29 +685,37 @@ fn toggle_run() {
 /// 押した位置の的
 fn target_at(x: i32, y: i32) -> Target {
     if y < HDR_H {
-        return if x >= HDR_BPM_HIT_X { Target::Bpm } else { Target::None };
+        return if (HDR_BPM_HIT_X0..HDR_BPM_HIT_X1).contains(&x) { Target::Bpm } else { Target::None };
     }
     if y < BODY_Y {
         return if x >= PLAY_HIT_X { Target::Play } else { Target::None };
     }
-    if y < BIG_Y1 {
-        return if x >= MET_HIT_X { Target::Meter } else { Target::Bpm };
+    if x < MET_HIT_X {
+        Target::Bpm
+    } else if y < MET_HIT_SPLIT_Y {
+        Target::Num
+    } else {
+        Target::Den
     }
-    Target::None
+}
+
+fn is_value(t: Target) -> bool {
+    matches!(t, Target::Bpm | Target::Num | Target::Den)
 }
 
 fn den_index(den: u32) -> i32 {
     DEN_TABLE.iter().position(|&d| d == den).unwrap_or(1) as i32
 }
 
-/// BPM のシャトル: 変位で決まる速さ(bpm/秒)を時間で積分する。端数は mbpm で持ち越す
-fn shuttle_bpm(dx: i32, now: u32) {
+/// BPM のシャトル: 変位で決まる速さ(bpm/秒)を時間で積分する。端数は mbpm で持ち越す。
+/// `up` は押した位置から上への変位(px。下は負)
+fn shuttle_bpm(up: i32, now: u32) {
     unsafe {
         let dt = now.wrapping_sub(SHUTTLE_LAST_MS).min(500) as i32;
         SHUTTLE_LAST_MS = now;
         let mut speed = 0;
         for &(px, v) in SHUTTLE_STAGES.iter() {
-            if dx.abs() >= px {
+            if up.abs() >= px {
                 speed = v as i32;
             }
         }
@@ -678,7 +723,7 @@ fn shuttle_bpm(dx: i32, now: u32) {
             SHUTTLE_ACC = 0;
             return;
         }
-        SHUTTLE_ACC += speed * dt * dx.signum();
+        SHUTTLE_ACC += speed * dt * up.signum();
         let delta = SHUTTLE_ACC / 1000;
         if delta == 0 {
             return;
@@ -692,18 +737,31 @@ fn shuttle_bpm(dx: i32, now: u32) {
     }
 }
 
-/// 拍子のドラッグ: 起点からの変位で値が決まる(位置)。確定は離したとき
-fn drag_meter(dx: i32, dy: i32) {
+/// 上への変位を段数にする(最初の MET_DEAD_PX は 0 段)
+fn drag_steps(up: i32, step_px: i32) -> i32 {
+    let d = (up.abs() - MET_DEAD_PX).max(0);
+    up.signum() * ((d + step_px - 1) / step_px)
+}
+
+/// 分子・分母のドラッグ: 押した位置からの上下の変位で値が決まる(位置。上 = 大きく)。確定は離したとき
+fn drag_meter(dy: i32) {
     unsafe {
-        EDIT_NUM = (MET_NUM0 as i32 + dx / MET_STEP_PX).clamp(1, NUM_MAX as i32) as u32;
-        let idx = (MET_DEN_IDX0 - dy / MET_STEP_PX).clamp(0, DEN_TABLE.len() as i32 - 1);
-        EDIT_DEN = DEN_TABLE[idx as usize];
+        match TARGET {
+            Target::Num => {
+                EDIT_NUM = (MET_NUM0 as i32 + drag_steps(-dy, NUM_STEP_PX)).clamp(1, NUM_MAX as i32) as u32;
+            }
+            Target::Den => {
+                let idx = (MET_DEN_IDX0 + drag_steps(-dy, DEN_STEP_PX)).clamp(0, DEN_TABLE.len() as i32 - 1);
+                EDIT_DEN = DEN_TABLE[idx as usize];
+            }
+            _ => {}
+        }
     }
 }
 
 fn end_edit() {
     unsafe {
-        if EDITING && TARGET == Target::Meter {
+        if EDITING && (TARGET == Target::Num || TARGET == Target::Den) {
             apply_meter(EDIT_NUM, EDIT_DEN);
             draw_beats(usize::MAX);
         }
@@ -718,15 +776,6 @@ fn on_action(a: Action, now: u32) {
             Action::Press { x, y } => {
                 TARGET = target_at(x, y);
                 EDITING = false;
-            }
-            // ▶ / ■ はタップ(長押しに意味は無いので、長押しのまま離しても同じ。ui-conventions §2)
-            Action::Tap { .. } | Action::LongPressFired { .. } if TARGET == Target::Play => {
-                TARGET = Target::None;
-                toggle_run();
-            }
-            Action::LongPressArmed { .. } if TARGET == Target::Bpm || TARGET == Target::Meter => {
-                // 成立したら点滅(値の変更に入れる合図)
-                EDITING = true;
                 SHUTTLE_ACC = 0;
                 SHUTTLE_LAST_MS = now;
                 MET_NUM0 = NUM;
@@ -734,16 +783,30 @@ fn on_action(a: Action, now: u32) {
                 EDIT_NUM = NUM;
                 EDIT_DEN = DEN;
             }
-            Action::Shuttle { dx, dy } if EDITING => {
+            // ▶ / ■ はタップ(長押しに意味は無いので、長押しのまま離しても同じ。ui-conventions §2)
+            Action::Tap { .. } | Action::LongPressFired { .. } if TARGET == Target::Play => {
+                TARGET = Target::None;
+                toggle_run();
+            }
+            // 触ってそのままドラッグ(Drag)で値を変える。長押ししてからのドラッグ(Shuttle)も同じに扱う
+            // (2026-10-04 の追記)。長押しが成立しただけでも点滅させる(掴んだ合図)
+            Action::LongPressArmed { .. } if is_value(TARGET) => {
+                EDITING = true;
+                SHUTTLE_LAST_MS = now;
+            }
+            Action::Drag { dy, .. } | Action::Shuttle { dy, .. } if is_value(TARGET) => {
+                if !EDITING {
+                    EDITING = true;
+                    SHUTTLE_LAST_MS = now;
+                }
                 if TARGET == Target::Bpm {
-                    shuttle_bpm(dx, now);
+                    shuttle_bpm(-dy, now);
                 } else {
-                    drag_meter(dx, dy);
+                    drag_meter(dy);
                 }
             }
-            Action::ShuttleEnd | Action::LongPressFired { .. } | Action::Tap { .. } | Action::Cancel => {
-                end_edit();
-            }
+            // 確定は離したとき(app_tick が UP のたびに end_edit を呼ぶ)。Cancel(タップ / 長押しの取り消し)では
+            // 終えない: ドラッグの閾値(24px)の手前の移動で Cancel が先に来る
             _ => {}
         }
     }
@@ -756,12 +819,15 @@ pub extern "C" fn app_init() -> i32 {
         hostapi_fill_rect(0, STA_Y, 320, STA_H, STA_BG);
         hostapi_fill_rect(0, BODY_Y, 320, 240 - BODY_Y, BODY_BG);
         text(TITLE_X, TITLE_Y, b"Metronome", TXT_CREAM);
+        hostapi_fill_rect(MET_LINE_X, MET_LINE_Y, MET_LINE_W, MET_LINE_H, TXT_CREAM); // 分数の線
 
         BPM = 120;
         NUM = 4;
         DEN = 4;
         RUNNING = false;
         GESTURE = Gesture::new();
+        // 触ってすぐのドラッグを値の変更に使う(縦スワイプのスクロールにしない)
+        (*addr_of_mut!(GESTURE)).allow_drag(true);
         TARGET = Target::None;
         EDITING = false;
         OFFSET = 0;
@@ -769,7 +835,8 @@ pub extern "C" fn app_init() -> i32 {
         PENDING_LEN = 0;
         PENDING_OFF = 0;
         SHOWN_BPM = u32::MAX;
-        SHOWN_METER = u32::MAX;
+        SHOWN_NUM = u32::MAX;
+        SHOWN_DEN = u32::MAX;
         SHOWN_HINT = false;
         LAST_BEAT_KEY = u64::MAX;
         SHOWN_BEATS = u32::MAX;
@@ -796,16 +863,18 @@ pub extern "C" fn app_tick() {
     };
     let now = unsafe { hostapi_now_ms() };
     for ev in &evs[..n.max(0) as usize] {
-        // 拍子は「離した位置」で決める。実機は前に届けた位置から 8px 動いたときだけ MOVE を届けるので、
+        // 分子・分母は「離した位置」で決める。実機は前に届けた位置から 8px 動いたときだけ MOVE を届けるので、
         // 最後の数 px は UP にしか入らないことがある(UP には最終座標が入る。shared/hostapi_defs.h)。
-        // Gesture は UP の座標を使わないので、ここで拾う(Phase 22b ステップ 5 で実機の 32px のドラッグが 1 段足りなかった)
+        // Gesture は UP の座標を使わないので、ここで拾う(Phase 22b ステップ 5 で実機の 32px のドラッグが 1 段足りなかった)。
+        // ドラッグの閾値(24px)に届く前に離した場合も、ここで MET_DEAD_PX を超えていれば効く
         unsafe {
             let g = &*addr_of!(GESTURE);
-            if ev.ev_type == appui::EV_TOUCH_UP && EDITING && TARGET == Target::Meter
-                && (g.armed() || g.shuttling())
-            {
-                if let Some((px, py)) = g.press_pos() {
-                    drag_meter(ev.x as i32 - px, ev.y as i32 - py);
+            if ev.ev_type == appui::EV_TOUCH_UP && (TARGET == Target::Num || TARGET == Target::Den) {
+                if let Some((_, py)) = g.press_pos() {
+                    drag_meter(ev.y as i32 - py);
+                    if EDIT_NUM != NUM || EDIT_DEN != DEN {
+                        EDITING = true;
+                    }
                 }
             }
         }
@@ -813,6 +882,9 @@ pub extern "C" fn app_tick() {
             (*addr_of_mut!(GESTURE)).on_event(ev.ev_type, ev.x as i32, ev.y as i32, ev.time_ms)
         };
         on_action(a, now);
+        if ev.ev_type == appui::EV_TOUCH_UP {
+            end_edit(); // ドラッグの閾値の手前で離したとき(Gesture は何も返さない)も確定する
+        }
     }
     let a = unsafe { (*addr_of_mut!(GESTURE)).tick(now) };
     on_action(a, now);
