@@ -117,18 +117,27 @@ const PLAY_HIT_X: i32 = 240; // 当たり判定はステータス行の右 80px(
 const SYM_PLAY: &[u8] = b"\xEF\x81\x8B"; // U+F04B ▶
 const SYM_STOP: &[u8] = b"\xEF\x81\x8D"; // U+F04D ■
 
-// ---- 本体(ステップ 2〜4 で巨大な数字と拍の枠に置き換える)----
-const LAMP_Y: i32 = 76;
-const LAMP_H: i32 = 36;
-const LAMP_W: i32 = 44;
-const LAMP_GAP: i32 = 8;
-const LAMP_X0: i32 = 12;
-const MAX_BEATS: usize = 6;
+// ---- 本体: 巨大な数字(7 セグメントを fill_rect で描く。Host API に大きな文字は無い。D2)----
+// BPM は左に 3 桁、拍子は右に分数(分子 / 線 / 分母、各 2 桁)。座標は docs/results/phase22b.md 0-1 の案 A
+const BPM_X: i32 = 10;
+const BPM_Y: i32 = 62;
+const BPM_DW: i32 = 54; // 1 桁の幅
+const BPM_DH: i32 = 104; // 1 桁の高さ
+const BPM_T: i32 = 12; // 画の太さ
+const BPM_GAP: i32 = 10;
+const MET_X: i32 = 232;
+const MET_NUM_Y: i32 = 60;
+const MET_DEN_Y: i32 = 124;
+const MET_DW: i32 = 30;
+const MET_DH: i32 = 46;
+const MET_T: i32 = 7;
+const MET_GAP: i32 = 6;
+const MET_LINE_X: i32 = 228;
+const MET_LINE_Y: i32 = 114;
+const MET_LINE_W: i32 = 84;
+const MET_LINE_H: i32 = 4;
 
-const FINE_Y: i32 = 120;
-const FINE_H: i32 = 44;
-// -1 は BPM- の真上、+1 は BPM+ の真上(右の 2 枠は Phase 21c で V-/V+ を外して空けた)
-const FINE_LABELS: [&[u8]; 2] = [b"-1", b"+1"];
+// ---- 本体の下端(ステップ 3 で長押し + ドラッグに置き換えるまで仮に残すボタン)----
 
 const BTN_Y: i32 = 176;
 const BTN_H: i32 = 52;
@@ -157,7 +166,9 @@ static mut RUNNING: bool = false;
 // (locate / start の直後に取り直す。それ以外では不変)
 static mut OFFSET: u32 = 0;
 static mut NEXT_BEAT: u32 = 0;
-static mut LAMP_LIT: usize = usize::MAX;
+// 描いてある数字(同じ値なら描き直さない)。u32::MAX = まだ描いていない
+static mut SHOWN_BPM: u32 = u32::MAX;
+static mut SHOWN_METER: u32 = u32::MAX;
 static mut LAST_BEAT_KEY: u64 = u64::MAX;
 
 // プレフィックス受理契約(docs/hostapi.md §5)の未受理分。1 拍 = 1 イベント
@@ -364,29 +375,80 @@ fn draw_status() {
         let mut h = Line::new();
         h.push_u32(BPM).push(b"bpm");
         h.draw(HDR_BPM_X, TITLE_Y, TXT_CREAM);
-        let mut l = Line::new();
-        l.push(b"beats/bar: ").push_u32(SIGS[SIG_IDX]);
-        l.draw(12, 56, TXT_CREAM);
+    }
+    draw_big_numbers();
+}
+
+// 7 セグメントの画の並び(a = 上、b = 右上、c = 右下、d = 下、e = 左下、f = 左上、g = 中)。bit 0 = a
+const SEG_DIGITS: [u8; 10] = [
+    0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110,
+    0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111,
+];
+
+/// 1 桁を 7 枚の矩形で描く。`digit` が None なら全部消す(先頭の桁の空白)。
+///
+/// 角を埋めた字形(横画は全幅、縦画は横画に重ねる)にするが、**スロットは (x, y) で引かれる**ので
+/// 7 枚の左上が重ならないようにする: a と f、g と e は左上が同じになるので、f と e を 1px 下げる
+/// (a / g が消えているときだけ 1px 欠ける。該当は「4」の左上のみ)。消す画は同じ座標に w = h = 0
+/// (ui-conventions §3.5)。
+fn draw_digit(x: i32, y: i32, w: i32, h: i32, t: i32, digit: Option<u32>, rgb: u32) {
+    let hv = (h - 3 * t) / 2; // 縦画 1 本ぶんの、横画に挟まれた長さ
+    let segs: [(i32, i32, i32, i32); 7] = [
+        (x, y, w, t),                              // a
+        (x + w - t, y, t, 2 * t + hv),             // b
+        (x + w - t, y + t + hv, t, h - t - hv),    // c
+        (x, y + h - t, w, t),                      // d
+        (x, y + t + hv + 1, t, h - t - hv - 1),    // e
+        (x, y + 1, t, 2 * t + hv - 1),             // f
+        (x, y + t + hv, w, t),                     // g
+    ];
+    let bits = digit.map_or(0, |d| SEG_DIGITS[d as usize % 10]);
+    for (i, &(sx, sy, sw, sh)) in segs.iter().enumerate() {
+        let on = bits & (1 << i) != 0;
+        unsafe {
+            if on {
+                hostapi_fill_rect(sx, sy, sw, sh, rgb);
+            } else {
+                hostapi_fill_rect(sx, sy, 0, 0, rgb);
+            }
+        }
     }
 }
 
-fn draw_lamps(lit: usize) {
-    unsafe {
-        let n = SIGS[SIG_IDX] as usize;
-        for i in 0..MAX_BEATS {
-            let x = LAMP_X0 + (i as i32) * (LAMP_W + LAMP_GAP);
-            let color = if i >= n {
-                BODY_BG // 拍子の外は背景色で消す
-            } else if i == lit {
-                if i == 0 { BEAT_ACCENT } else { BEAT_ON }
-            } else {
-                BEAT_OFF
-            };
-            hostapi_fill_rect(x, LAMP_Y, LAMP_W, LAMP_H, color);
-        }
-        LAMP_LIT = lit;
+/// `v` を右詰め `n` 桁で描く(上の桁の 0 は空白)
+fn draw_number(x: i32, y: i32, w: i32, h: i32, t: i32, gap: i32, n: u32, v: u32, rgb: u32) {
+    let mut div = 1;
+    for _ in 1..n {
+        div *= 10;
+    }
+    for i in 0..n {
+        let d = (v / div) % 10;
+        let blank = d == 0 && v < div && div > 1;
+        draw_digit(x + i as i32 * (w + gap), y, w, h, t, if blank { None } else { Some(d) }, rgb);
+        div /= 10;
     }
 }
+
+/// 巨大な BPM と拍子。値が変わったときだけ描く(矩形のスロットの書き換えを減らす)
+fn draw_big_numbers() {
+    unsafe {
+        if SHOWN_BPM != BPM {
+            SHOWN_BPM = BPM;
+            draw_number(BPM_X, BPM_Y, BPM_DW, BPM_DH, BPM_T, BPM_GAP, 3, BPM, TXT_CREAM);
+        }
+        let (num, den) = (beats_per_bar(), 4);
+        let key = num * 100 + den;
+        if SHOWN_METER != key {
+            SHOWN_METER = key;
+            draw_number(MET_X, MET_NUM_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, num, TXT_CREAM);
+            hostapi_fill_rect(MET_LINE_X, MET_LINE_Y, MET_LINE_W, MET_LINE_H, TXT_CREAM);
+            draw_number(MET_X, MET_DEN_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, den, TXT_CREAM);
+        }
+    }
+}
+
+/// 拍の表示。ステップ 4 で下端の枠として作り直す(それまでは何も描かない)
+fn draw_beats(_lit: usize) {}
 
 /// ステータス行右の ▶ / ■(停止中は ▶ = 押すと鳴る、再生中は ■ = 押すと止まる。ui-conventions §4)
 fn draw_run_button() {
@@ -409,14 +471,7 @@ fn draw_buttons() {
     draw_run_button();
 }
 
-fn draw_fine_buttons() {
-    for i in 0..FINE_LABELS.len() {
-        unsafe {
-            hostapi_fill_rect(BTN_XS[i], FINE_Y, BTN_W, FINE_H, 0x24_48_3a);
-        }
-        text(BTN_XS[i] + 24, FINE_Y + 18, FINE_LABELS[i], TXT_CREAM);
-    }
-}
+
 
 /// now_ms は wraparound しうるので、差分を符号付きで見て到達判定する
 fn time_reached(now: u32, target: u32) -> bool {
@@ -470,7 +525,7 @@ fn toggle_run() {
             PENDING_LEN = 0;
             PENDING_OFF = 0;
             NEXT_BEAT = 0;
-            draw_lamps(usize::MAX);
+            draw_beats(usize::MAX);
         } else {
             // マップは常に at_tick=0 の 1 エントリ。start は song tick 0 から始まる
             hostapi_tempomap_set_meter(0, beats_per_bar() as i32, 4);
@@ -499,21 +554,6 @@ fn handle_tap(x: i16, y: i16) {
         return;
     }
 
-    // -1 / +1(Phase 7D の行。V- / V+ は Phase 21c で外した)
-    if y >= FINE_Y && y < FINE_Y + FINE_H {
-        for i in 0..FINE_LABELS.len() {
-            if x >= BTN_XS[i] && x < BTN_XS[i] + BTN_W {
-                match i {
-                    0 => start_repeat(-1, now),
-                    1 => start_repeat(1, now),
-                    _ => {}
-                }
-                break;
-            }
-        }
-        return;
-    }
-
     if y < BTN_Y || y >= BTN_Y + BTN_H {
         return;
     }
@@ -526,7 +566,7 @@ fn handle_tap(x: i16, y: i16) {
                     2 => {
                         SIG_IDX = (SIG_IDX + 1) % SIGS.len();
                         apply_meter();
-                        draw_lamps(usize::MAX);
+                        draw_beats(usize::MAX);
                         draw_status();
                     }
                     _ => {}
@@ -553,7 +593,8 @@ pub extern "C" fn app_init() -> i32 {
         NEXT_BEAT = 0;
         PENDING_LEN = 0;
         PENDING_OFF = 0;
-        LAMP_LIT = usize::MAX;
+        SHOWN_BPM = u32::MAX;
+        SHOWN_METER = u32::MAX;
         LAST_BEAT_KEY = u64::MAX;
 
         // テンポ / 拍子マップは常に at_tick=0 の 1 エントリだけを上書きして使う
@@ -561,8 +602,7 @@ pub extern "C" fn app_init() -> i32 {
         hostapi_tempomap_set_tempo(0, upq_of(BPM));
     }
     draw_status();
-    draw_lamps(usize::MAX);
-    draw_fine_buttons();
+    draw_beats(usize::MAX);
     draw_buttons();
     0
 }
@@ -601,7 +641,7 @@ pub extern "C" fn app_tick() {
         let key = (p.bar as u64) * (beats_per_bar() as u64) + p.beat as u64;
         if key != LAST_BEAT_KEY {
             LAST_BEAT_KEY = key;
-            draw_lamps(p.beat as usize);
+            draw_beats(p.beat as usize);
         }
     }
 }
