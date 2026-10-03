@@ -141,6 +141,23 @@ const MET_LINE_X: i32 = 228;
 const MET_LINE_Y: i32 = 114;
 const MET_LINE_W: i32 = 84;
 const MET_LINE_H: i32 = 4;
+// 使わない画は一度も描かない(矩形のスロットを取らない)。拍子の 10 の位は「1」だけ(最大 16)、
+// BPM の 100 の位は「1」「2」だけ(40〜240)。0x7f = 全部
+const SEG_ONE: u8 = 0b0000110; // b c
+const SEG_ONE_TWO: u8 = 0b1011111; // a b c d e g(f は使わない)
+const SEG_ALL: u8 = 0b1111111;
+
+// ---- 拍の枠(下端に 1 段。分子の数だけ並べ、全体の幅は一定。D5 とユーザーの変更)----
+const BEAT_Y: i32 = 184;
+const BEAT_H: i32 = 46;
+const BEAT_X0: i32 = 8;
+const BEAT_W: i32 = 304;
+const BEAT_CELL_MAX: i32 = 72;
+/// 番号を枠の中に出すのは 8 拍まで。文字のスロットも座標で引かれて解放されないので、
+/// 出す位置の数(1〜8 拍で計 36)を抑える。9 拍以上は枠が細く 2 桁が入らない
+const BEAT_NUM_MAX: u32 = 8;
+const BEAT_NUM_Y: i32 = BEAT_Y + 15;
+const BEAT_DIGIT_W: i32 = 8; // 番号の 1 桁の幅の目安(中央に置くため)
 
 // 本体の当たり判定: 数字の左が BPM、右が拍子(y は本体の上から拍の枠の手前まで)
 const BIG_Y1: i32 = 178;
@@ -171,6 +188,9 @@ static mut SHOWN_BPM: u32 = u32::MAX;
 static mut SHOWN_METER: u32 = u32::MAX;
 static mut SHOWN_HINT: bool = false;
 static mut LAST_BEAT_KEY: u64 = u64::MAX;
+// 描いてある拍の枠(拍数と点いている拍)。u32::MAX / usize::MAX = まだ / 消灯
+static mut SHOWN_BEATS: u32 = u32::MAX;
+static mut SHOWN_LIT: usize = usize::MAX;
 
 // プレフィックス受理契約(docs/hostapi.md §5)の未受理分。1 拍 = 1 イベント
 const CHUNK_MAX: usize = 1;
@@ -438,7 +458,7 @@ const SEG_DIGITS: [u8; 10] = [
 /// 7 枚の左上が重ならないようにする: a と f、g と e は左上が同じになるので、f と e を 1px 下げる
 /// (a / g が消えているときだけ 1px 欠ける。該当は「4」の左上のみ)。消す画は同じ座標に w = h = 0
 /// (ui-conventions §3.5)。
-fn draw_digit(x: i32, y: i32, w: i32, h: i32, t: i32, digit: Option<u32>, rgb: u32) {
+fn draw_digit(x: i32, y: i32, w: i32, h: i32, t: i32, digit: Option<u32>, used: u8, rgb: u32) {
     let hv = (h - 3 * t) / 2; // 縦画 1 本ぶんの、横画に挟まれた長さ
     let segs: [(i32, i32, i32, i32); 7] = [
         (x, y, w, t),                              // a
@@ -451,6 +471,9 @@ fn draw_digit(x: i32, y: i32, w: i32, h: i32, t: i32, digit: Option<u32>, rgb: u
     ];
     let bits = digit.map_or(0, |d| SEG_DIGITS[d as usize % 10]);
     for (i, &(sx, sy, sw, sh)) in segs.iter().enumerate() {
+        if used & (1 << i) == 0 {
+            continue; // この桁では出ない画(スロットを取らない)
+        }
         let on = bits & (1 << i) != 0;
         unsafe {
             if on {
@@ -462,8 +485,8 @@ fn draw_digit(x: i32, y: i32, w: i32, h: i32, t: i32, digit: Option<u32>, rgb: u
     }
 }
 
-/// `v` を右詰め `n` 桁で描く(上の桁の 0 は空白)
-fn draw_number(x: i32, y: i32, w: i32, h: i32, t: i32, gap: i32, n: u32, v: u32, rgb: u32) {
+/// `v` を右詰め `n` 桁で描く(上の桁の 0 は空白)。`top` は最上位の桁で使う画(下の桁は全部)
+fn draw_number(x: i32, y: i32, w: i32, h: i32, t: i32, gap: i32, n: u32, v: u32, top: u8, rgb: u32) {
     let mut div = 1;
     for _ in 1..n {
         div *= 10;
@@ -471,7 +494,8 @@ fn draw_number(x: i32, y: i32, w: i32, h: i32, t: i32, gap: i32, n: u32, v: u32,
     for i in 0..n {
         let d = (v / div) % 10;
         let blank = d == 0 && v < div && div > 1;
-        draw_digit(x + i as i32 * (w + gap), y, w, h, t, if blank { None } else { Some(d) }, rgb);
+        let used = if i == 0 { top } else { SEG_ALL };
+        draw_digit(x + i as i32 * (w + gap), y, w, h, t, if blank { None } else { Some(d) }, used, rgb);
         div /= 10;
     }
 }
@@ -484,7 +508,7 @@ fn draw_big_numbers() {
         let key = BPM | (c << 8);
         if SHOWN_BPM != key {
             SHOWN_BPM = key;
-            draw_number(BPM_X, BPM_Y, BPM_DW, BPM_DH, BPM_T, BPM_GAP, 3, BPM, c);
+            draw_number(BPM_X, BPM_Y, BPM_DW, BPM_DH, BPM_T, BPM_GAP, 3, BPM, SEG_ONE_TWO, c);
         }
         // 拍子はドラッグ中なら確定前の値を出す
         let (num, den) = if EDITING && TARGET == Target::Meter { (EDIT_NUM, EDIT_DEN) } else { (NUM, DEN) };
@@ -492,15 +516,106 @@ fn draw_big_numbers() {
         let key = (num * 100 + den) | (c << 8);
         if SHOWN_METER != key {
             SHOWN_METER = key;
-            draw_number(MET_X, MET_NUM_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, num, c);
+            draw_number(MET_X, MET_NUM_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, num, SEG_ONE, c);
             hostapi_fill_rect(MET_LINE_X, MET_LINE_Y, MET_LINE_W, MET_LINE_H, c);
-            draw_number(MET_X, MET_DEN_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, den, c);
+            draw_number(MET_X, MET_DEN_Y, MET_DW, MET_DH, MET_T, MET_GAP, 2, den, SEG_ONE, c);
         }
     }
 }
 
-/// 拍の表示。ステップ 4 で下端の枠として作り直す(それまでは何も描かない)
-fn draw_beats(_lit: usize) {}
+/// 拍の枠 j の左端と右端(拍数 n のとき)
+fn beat_cell(n: u32, j: u32) -> (i32, i32) {
+    let n = n as i32;
+    let gap = if n <= 8 { 4 } else { 2 };
+    let cw = ((BEAT_W - gap * (n - 1)) / n).min(BEAT_CELL_MAX);
+    let total = cw * n + gap * (n - 1);
+    let l = BEAT_X0 + (BEAT_W - total) / 2 + j as i32 * (cw + gap);
+    (l, l + cw)
+}
+
+/// 塗り重ねの層 s の起点の x。**層ごとに違う座標にする**(スロットは (x, y) で引かれる)。画面の左外
+fn beat_layer_x(s: u32) -> i32 {
+    -1 - s as i32
+}
+
+fn beat_color(j: u32, lit: usize) -> u32 {
+    if j as usize == lit {
+        if j == 0 { BEAT_ACCENT } else { BEAT_ON }
+    } else {
+        BEAT_OFF
+    }
+}
+
+/// 枠 j の色付きの層(右端まで)を描く。層は「最後の枠から先に」重ねるので、枠 j は層 2 * (n - 1 - j)
+fn draw_beat_cell(n: u32, j: u32, lit: usize) {
+    let s = 2 * (n - 1 - j);
+    let x = beat_layer_x(s);
+    let (_, r) = beat_cell(n, j);
+    unsafe { hostapi_fill_rect(x, BEAT_Y, r - x, BEAT_H, beat_color(j, lit)) };
+}
+
+/// 枠の番号(点いている枠だけ。8 拍まで)
+fn draw_beat_number(n: u32, j: u32, on: bool) {
+    if n > BEAT_NUM_MAX {
+        return;
+    }
+    let (l, r) = beat_cell(n, j);
+    let x = (l + r) / 2 - BEAT_DIGIT_W / 2;
+    let mut t = Line::new();
+    if on {
+        t.push_u32(j + 1);
+    }
+    t.draw(x, BEAT_NUM_Y, BODY_BG);
+}
+
+/// 拍の表示。分子の数だけ枠を並べ、`lit` の枠を点ける(usize::MAX なら全部消灯)。
+///
+/// **枠の位置は拍子で変わるが、スロットは座標で引かれて解放されない**ので、枠ごとに矩形を置くと
+/// 拍子を変えるたびにスロットが増える(全拍子で 136 か所)。そこで**左端をそろえた矩形の塗り重ね**にする:
+/// 最後の枠から順に「その枠の右端までの色付きの層」「その枠の左端までの黒の層」を重ねると、
+/// 上の層が左側を塗り直すので、各枠と枠の間の隙間が残る。層の起点は画面の左外に 1px ずつずらして置き、
+/// **スロットは常に 32 枚(16 拍 × 2)**。重なり順は最初に描いた順(app_init で層 0 から順に作る)。
+fn draw_beats(lit: usize) {
+    unsafe {
+        let n = NUM;
+        if SHOWN_BEATS != n {
+            // 並びが変わった: 全部の層を描き直す
+            if SHOWN_LIT != usize::MAX && SHOWN_BEATS != u32::MAX && SHOWN_LIT < SHOWN_BEATS as usize {
+                draw_beat_number(SHOWN_BEATS, SHOWN_LIT as u32, false);
+            }
+            for s in 0..2 * NUM_MAX {
+                let x = beat_layer_x(s);
+                if s >= 2 * n {
+                    hostapi_fill_rect(x, BEAT_Y, 0, 0, BODY_BG); // 使わない層
+                } else if s % 2 == 0 {
+                    draw_beat_cell(n, n - 1 - s / 2, lit);
+                } else {
+                    let (l, _) = beat_cell(n, n - 1 - s / 2);
+                    hostapi_fill_rect(x, BEAT_Y, l - x, BEAT_H, BODY_BG);
+                }
+            }
+            SHOWN_BEATS = n;
+            SHOWN_LIT = lit;
+            if lit < n as usize {
+                draw_beat_number(n, lit as u32, true);
+            }
+            return;
+        }
+        if SHOWN_LIT == lit {
+            return;
+        }
+        // 点く枠が変わっただけ: 前の枠と今の枠の色付きの層だけ描き直す
+        if SHOWN_LIT < n as usize {
+            draw_beat_cell(n, SHOWN_LIT as u32, lit);
+            draw_beat_number(n, SHOWN_LIT as u32, false);
+        }
+        if lit < n as usize {
+            draw_beat_cell(n, lit as u32, lit);
+            draw_beat_number(n, lit as u32, true);
+        }
+        SHOWN_LIT = lit;
+    }
+}
 
 /// ステータス行右の ▶ / ■(停止中は ▶ = 押すと鳴る、再生中は ■ = 押すと止まる。ui-conventions §4)
 fn draw_run_button() {
@@ -657,6 +772,8 @@ pub extern "C" fn app_init() -> i32 {
         SHOWN_METER = u32::MAX;
         SHOWN_HINT = false;
         LAST_BEAT_KEY = u64::MAX;
+        SHOWN_BEATS = u32::MAX;
+        SHOWN_LIT = usize::MAX;
 
         // 停止中のマップは at_tick=0 の 1 エントリ(再生のたびに clear して書き直す)
         hostapi_tempomap_clear();
