@@ -254,3 +254,21 @@
   - 実機の回帰 3 本 PASS(`captures/phase22b-r2-device-regress`): 開始時 free_int 150,264・largest_int 98,304(5-1 と同じ)、metronome ×3 の差分 +0、
     許容外の WARN / ERROR 0 件。デモ 36 手順 PASS(`phase22b-r2-device-demo`。heap 差分 0、BPM は 120 → 132)。
 - 残り(人の確認): 指を止めたまま BPM が変わり続けることと、端での速さの感触。分子 8px・分母 20px の刻みの感触。
+
+### 5-5. 加速をやめ、位置で ±1 / ±10(指示書の「追記 (2026-10-04, 2)」)
+
+5-4 の版を触ったユーザーの判断: 表示の並び・変える値・長押しなしは良いが、**値の変わり方が使いにくい**。
+
+- **BPM のシャトル(変位 = 速さ)をやめ、BPM も押した位置からの変位で決める**: 上下 12px で ±1、左右 24px で ±10(両方を足す)。
+  各軸とも最初の 12px は動かない。演奏中はドラッグ中に値が変わるたびに反映する(次の拍の頭から。D11 の書き方のまま)。
+- **分子・分母は上下 12px で 1 段**(分子 ±1、分母は 2 / 4 / 8 / 16 の隣へ)。左右は効かない。確定は離したとき。
+- 離した位置で決め直す処理(5-2 の 2)は BPM にも広げた。シャトルの積分のコード(`SHUTTLE_*`)は消した。
+- BPM が位置で決まり値が揺れなくなったので、**回帰のシナリオで BPM も確かめる**:
+  `expect 120bpm; expect 4/4; expect drag up / down; drag 100 110 0 -36 0; expect 122bpm; drag 60 110 36 0 0; expect 132bpm; expect ▶;
+  tap 300 38; expect ■; wait 2; drag 270 85 0 -36 0; expect 6/4; drag 270 150 0 -24 0; expect 6/8; expect ■; wait 1; tap 300 38; expect ▶`。
+  デモにも BPM の `expect` を足した(120 → 128 → 178)。
+- **結果**:
+  - Linux の回帰 3 本 PASS(`captures/phase22b-r3-linux-regress`): metronome highmark **34,656**(`.wasm` 7.3KB。基準はこの値に取り直す)、
+    mp3player 19,112、hostapi_check 34,728(不変)。デモ 38 手順 PASS。
+  - 実機の回帰 3 本 PASS(`captures/phase22b-r3-device-regress`): 開始時 free_int 150,264・largest_int 98,304(5-1 と同じ)、metronome ×3 の差分 +0、
+    許容外の WARN / ERROR 0 件。デモ 38 手順 PASS(`phase22b-r3-device-demo`)。
