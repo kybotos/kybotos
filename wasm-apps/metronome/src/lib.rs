@@ -171,14 +171,15 @@ const BPM_MIN: u32 = 40;
 const BPM_MAX: u32 = 240;
 const NUM_MAX: u32 = 16;
 const DEN_TABLE: [u32; 4] = [2, 4, 8, 16];
-/// BPM・分子・分母は上下に「はじく」(押して、すっと動かして離す)と変わる(2026-10-04 の追記 3)。
-/// 変わるのは離したときで、量は動かした距離と速さで決まる。この px 未満の移動は何もしない(タップ・指の揺れ)
+/// BPM・分子・分母は上下に「はじく」(押して、すっと動かして離す)と、離したときに ±1 変わる(拍子は 1 段。
+/// 2026-10-04 の追記 3)。この px 未満の移動は何もしない(タップ・指の揺れ)
 const FLICK_MIN_PX: i32 = 16;
-/// これより遅い動き(px/秒)は距離によらず ±1(ゆっくり動かせば 1 ずつ確実に変えられる)
-const FLICK_SLOW_PXS: i32 = 400;
-/// BPM の量: 速い動きの距離(px)→ 量。この距離未満なら左の量(表の外は最後の量)
-const FLICK_BPM: [(i32, u32); 2] = [(70, 1), (130, 5)];
-const FLICK_BPM_MAX: u32 = 10;
+/// BPM の大きな変更: 押したまま上下に HOLD_PX 以上動かし、HOLD_START_MS 置くと、REPEAT_MS ごとに ±5 で変わり続ける。
+/// REPEAT_TO_10 回続くと ±10 になる(追記 4)。連続で変えた押下では、離したときの ±1 は無い
+const HOLD_PX: i32 = 24;
+const HOLD_START_MS: u32 = 400;
+const REPEAT_MS: u32 = 400;
+const REPEAT_TO_10: u32 = 4;
 /// 変更中の点滅の周期(ui-conventions §4)
 const BLINK_MS: u32 = 200;
 
@@ -221,10 +222,12 @@ static mut GESTURE: Gesture = Gesture::new();
 static mut TARGET: Target = Target::None;
 /// 値を変えている最中か(ドラッグが始まったら。点滅させる)
 static mut EDITING: bool = false;
-/// はじきの速さを測る起点(押下後の最初の MOVE の時刻と y。MOVE が無ければ押下の時刻と y)
-static mut FLICK_T0: u32 = 0;
-static mut FLICK_Y0: i32 = 0;
-static mut FLICK_MOVED: bool = false;
+/// 押下中の最新の y(MOVE で更新)
+static mut TOUCH_Y: i32 = 0;
+/// BPM の連続変更: 押したまま HOLD_PX を超えているか、次に変える時刻、この押下で変えた回数
+static mut HOLDING: bool = false;
+static mut NEXT_REPEAT: u32 = 0;
+static mut REPEATS: u32 = 0;
 /// 分子・分母の確定前の値(離したときに確定する。D11)
 static mut EDIT_NUM: u32 = 4;
 static mut EDIT_DEN: u32 = 4;
@@ -705,30 +708,35 @@ fn den_index(den: u32) -> i32 {
     DEN_TABLE.iter().position(|&d| d == den).unwrap_or(1) as i32
 }
 
-/// はじき 1 回で動かす段数(符号は上 = 正)。`dy` は押下から離すまでの上下の移動(下が正)、
-/// `fast_dy` / `fast_ms` は速さを測る区間の移動と時間
-fn flick_steps(target: Target, dy: i32, fast_dy: i32, fast_ms: u32) -> i32 {
-    let d = dy.abs();
-    if d < FLICK_MIN_PX {
-        return 0;
-    }
-    let sign = -dy.signum();
-    if target != Target::Bpm {
-        return sign; // 拍子は次の値へ 1 段だけ
-    }
-    let v = fast_dy.abs() * 1000 / fast_ms.max(1) as i32;
-    let mut n = FLICK_BPM_MAX;
-    if v < FLICK_SLOW_PXS {
-        n = 1;
-    } else {
-        for &(px, k) in FLICK_BPM.iter() {
-            if d < px {
-                n = k;
-                break;
-            }
+/// はじき 1 回で動かす段数(符号は上 = 正)。`dy` は押下から離すまでの上下の移動(下が正)
+fn flick_steps(dy: i32) -> i32 {
+    if dy.abs() < FLICK_MIN_PX { 0 } else { -dy.signum() }
+}
+
+/// BPM の連続変更(毎 tick)。押したまま HOLD_PX 以上動かして置いている間、±5、続くと ±10
+fn hold_repeat(now: u32) {
+    unsafe {
+        let Some((_, py)) = (*addr_of!(GESTURE)).press_pos() else { return };
+        if TARGET != Target::Bpm {
+            return;
         }
+        let dy = TOUCH_Y - py;
+        if dy.abs() < HOLD_PX {
+            HOLDING = false; // 戻したら止まる(もう一度動かせば最初の ±5 から)
+            return;
+        }
+        if !HOLDING {
+            HOLDING = true;
+            NEXT_REPEAT = now.wrapping_add(HOLD_START_MS);
+        }
+        if (now.wrapping_sub(NEXT_REPEAT) as i32) < 0 {
+            return;
+        }
+        let k = if REPEATS < REPEAT_TO_10 { 5 } else { 10 };
+        REPEATS += 1;
+        NEXT_REPEAT = now.wrapping_add(REPEAT_MS);
+        apply_flick(-dy.signum() * k);
     }
-    sign * n as i32
 }
 
 /// はじきを反映する。BPM は演奏中ならその場で(次の拍の頭から。D11)、拍子は end_edit で確定する(小節をやり直す)
@@ -843,25 +851,23 @@ pub extern "C" fn app_tick() {
     };
     let now = unsafe { hostapi_now_ms() };
     for ev in &evs[..n.max(0) as usize] {
-        // はじき: 離したときに、押下からの上下の移動と、最初の MOVE から離すまでの速さで量を決める。
+        // はじき: 離したときに、押下からの上下の移動で ±1(連続で変えた押下では何もしない)。
         // 移動は UP の座標で測る(実機は前に届けた位置から 8px 動いたときだけ MOVE を届けるので、最後の数 px は
         // UP にしか入らないことがある。UP には最終座標が入る。shared/hostapi_defs.h)。Gesture は UP の座標を使わないので、ここで見る
         unsafe {
             let y = ev.y as i32;
             match ev.ev_type {
                 appui::EV_TOUCH_DOWN => {
-                    FLICK_T0 = ev.time_ms;
-                    FLICK_Y0 = y;
-                    FLICK_MOVED = false;
+                    TOUCH_Y = y;
+                    HOLDING = false;
+                    REPEATS = 0;
                 }
-                appui::EV_TOUCH_MOVE if !FLICK_MOVED => {
-                    FLICK_T0 = ev.time_ms;
-                    FLICK_Y0 = y;
-                    FLICK_MOVED = true;
+                appui::EV_TOUCH_MOVE => {
+                    TOUCH_Y = y;
                 }
-                appui::EV_TOUCH_UP if is_value(TARGET) => {
+                appui::EV_TOUCH_UP if is_value(TARGET) && REPEATS == 0 => {
                     if let Some((_, py)) = (*addr_of!(GESTURE)).press_pos() {
-                        let steps = flick_steps(TARGET, y - py, y - FLICK_Y0, ev.time_ms.wrapping_sub(FLICK_T0));
+                        let steps = flick_steps(y - py);
                         if steps != 0 {
                             apply_flick(steps);
                         }
@@ -880,6 +886,7 @@ pub extern "C" fn app_tick() {
     }
     let a = unsafe { (*addr_of_mut!(GESTURE)).tick(now) };
     on_action(a);
+    hold_repeat(now);
     // 値と点滅を描く(変わっていなければ何もしない)
     draw_status();
 
