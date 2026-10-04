@@ -15,15 +15,16 @@
 //   - MIDI Clock はホスト(L1)が 40 tick グリッドから生成する。**アプリは
 //     Start/Stop も含めて MIDI を一切送らない**(`hostapi_midi_send` は使わない。
 //     送るとクロックが二重に出る)。
-//   - Phase 22b: 演奏中の BPM の変更(シャトル)は**次の拍の song tick にテンポを書く**
+//   - Phase 22b: 演奏中の BPM の変更は**次の拍の song tick にテンポを書く**
 //     (小節をやり直さない。1 拍に 1 件しか増えず、満杯ならホストが通過済みの区間を畳む。
 //     docs/hostapi.md §4)。拍子の変更は**小節をやり直す**: stop → clear → 初期値 → start
 //     (再生を始め直すときの契約どおり。Phase 13〜22a の「locate(0) して at_tick=0 を上書き」は、
 //     先の位置に書いたテンポのエントリが残るのでやめた。docs/results/phase22b.md のステップ 3)。
 //
-// Phase 22b: Kybotos のサンプルアプリとしての統一感(Sequencer と同じヘッダ + ステータス行、▶ / ■、
-// 対話規約の BPM・拍子の変え方)と、単機能アプリとしての簡素さ(BPM と拍子を巨大な数字で)に作り直す。
-// 設計は docs/results/phase22b.md のステップ 0。配色はメニュー(shared/launcher_theme.h)に合わせ、本体は黒。
+// Phase 22b: Kybotos のサンプルアプリとしての統一感(Sequencer と同じヘッダ + ステータス行、▶ / ■)と、
+// 単機能アプリとしての簡素さ(BPM と拍子を巨大な数字で)に作り直した。値は数字を上下に「はじく」と ±1、
+// BPM は押したまま上下で ±5 → ±10(実機を触って決めた。docs/results/phase22b.md のステップ 5)。
+// 画面と操作の仕様は docs/apps/metronome/spec.md。配色はメニュー(shared/launcher_theme.h)に合わせ、本体は黒。
 //
 // ホスト API (module "env") のみ使用。no_std / アロケータ不要。
 #![no_std]

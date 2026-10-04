@@ -301,3 +301,45 @@
   (向きは今の指の位置で決まる。24px 未満に戻すと止まり、もう一度動かすと ±5 から)。連続で変えた押下では、離したときの ±1 は無い。
 - 試行錯誤の途中なので**回帰は回していない**(ユーザーの指示)。Linux ではじきの ±1 だけ確かめ、実機に書き込んだ。
   シナリオの期待値は、はじきが常に ±1 になったのに合わせて直した(170px のはじきは +1)。連続変更は注入の `drag` では起きない。
+- **ユーザーの判断(2026-10-04): この形で確定。**
+
+### 5-8. 確定した版の回帰
+
+- **Linux の回帰 3 本 PASS**(`captures/phase22b-final-linux-regress`): **metronome の highmark の基準を 33,576 に取り直す**
+  (Phase 22a まで 22,952。appui の取り込み・7 セグメント・拍の枠・はじきで `.wasm` が 3.7KB → 7.3KB)。
+  mp3player 19,112、hostapi_check 34,728 は不変(`.wasm` を再ビルドしていない)。デモ 46 手順 PASS。
+- **実機の回帰 3 本 PASS**(`captures/phase22b-final-device-regress/report.md`、`KYBOTOS_DEV_APPS=ON`):
+
+| アプリ | 開始 free_int | int 差分 | largest_int | シナリオ |
+|---|---|---|---|---|
+| metronome ×3 | 150,264 | +0 / +0 / +0 | 98,304 | PASS(19 手順) |
+| mp3player | 150,264 | −36(U-23 の一度きり) | 98,304 | PASS |
+| hostapi_check | 150,228 | −176(U-30 の一度きり) | 98,304 | PASS |
+
+  開始時の free_int・largest_int は Phase 22a と同じ。許容外の WARN / ERROR 0 件。デモ 46 手順 PASS(`phase22b-final-device-demo`)。
+- 実機には回帰用(`KYBOTOS_DEV_APPS=ON`)のファームが入っている。
+
+## ステップ 6: 文書
+
+- **metronome の仕様書を新しく置いた**: `docs/apps/metronome/spec.md`(画面の座標と配色、操作、演奏中の変更の意味論、描画スロット、回帰)。
+- **`docs/design/ui-conventions.md` に足した一般則**:
+  - §2 の語彙に **上下のはじき**(±1)と **押したまま上下**(連続変更)。**値の変え方の選び方**: 長押し + ドラッグはスクロールと区別が要る画面
+    (sequencer)、はじきは単機能アプリで値を巨大に出しスクロールが無い画面(metronome)。同じ画面で混ぜない。
+    (指示書の追記で「規約に例外として書くか、規約を変えるか」とした論点は、**既存の語彙はそのままに、選べる語彙として足す**ことにした。)
+  - §4 に **大きな数字**(7 セグメントを `fill_rect` で、スロットの重なりを避ける字形、出ない画は描かない、層の塗り重ね、同じ値をヘッダの文字にも出す)。
+  - §5 に **画面が 1 枚のアプリ**(`ScreenStack` / `app_key` 不要、パンくずを出さない)。
+  - §6 に **離した位置は UP に入る**、**アプリの画面はスクロールしない**。
+- `docs/roadmap.md`: 22b を done に、U-26 の metronome の部分を消化(mp3player の分は残る)。`docs/status.md` に 2026-10-04 時点。
+- `docs/lessons.md` に「metronome の作り直し(Phase 22b)」の節。`docs/workflow.md` は変えない
+  (撮影スクリプト `scripts/metronome-shots.sh` とクリックの解析 `scripts/metronome_clicks.py` はこのアプリ用なので、使い方はスクリプトの冒頭に置いた)。
+
+## まとめ
+
+- metronome を作り直した: タイトル `Metronome`、ヘッダ(濃緑)+ ステータス行 + 黒の本体、▶ / ■、**巨大な BPM と拍子**(7 セグメント)、
+  拍の枠(1〜16 拍を 1 段、今の拍と 1 拍目の橙)、**拍子は 1〜16 / 2・4・8・16、拍は分母の音符**。
+- **操作は実機を触りながら 4 回作り直した**: 長押し + ドラッグ(規約どおり)→ 触ってすぐ上下(位置・加速)→ 位置で ±1 / ±10 →
+  **上下のはじきで ±1、BPM は押したままで ±5 → ±10**。ヘッダは `120bpm 4/4`(本体と同じ並び)。
+- 演奏中の BPM の変更は次の拍の頭から(小節をやり直さない)、拍子の変更は小節をやり直す(stop → clear → start)。
+- ホストの修正 1 件: **実機のアプリの画面がスクロールできた**ので止めた(`hostapi.cpp`。Host API / ABI は不変)。
+- **Host API / ABI 不変**、appui 不変(app-sequencer に影響なし)。描画スロットは rect 74 / 80、text 最大 41 / 80。
+- 回帰 3 本(実機・Linux)PASS。metronome の highmark の基準 33,576、mp3player / hostapi_check は不変。

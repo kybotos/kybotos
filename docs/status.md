@@ -893,3 +893,15 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - スプラッシュの表示時に起動音(`docs/sounds/kybotos.mp4`)を鳴らす(元の音の 50% × マスター音量)。
   - 確認: 実機・Linux の回帰 PASS、Host API / ABI 不変。開始時の `free_int` 150,264(Phase 22 から −40 B、起動時の一度きり)。
   - 実機は既定(OFF)のファームで残してある。
+
+## 2026-10-04 時点
+
+- **Phase 22b(metronome を磨く)完了。** 詳細は `docs/results/phase22b.md`、仕様は `docs/apps/metronome/spec.md`(新設)。
+  - 画面: タイトル `Metronome`、ヘッダ(濃緑、右に `120bpm 4/4`)+ ステータス行(▶ / ■)+ 黒の本体に**巨大な BPM と拍子**(7 セグメント)、
+    下端に拍の枠(1〜16 拍を 1 段、1 拍目は橙)。拍子は 1〜16 / 2・4・8・16 に広げ、**拍は分母の音符**。
+  - 操作: 数字を**上下にはじくと ±1**(拍子は 1 段)、**BPM は押したまま上下で ±5 → ±10**。実機を触って 4 回作り直して決めた。
+    `docs/design/ui-conventions.md` に語彙として足した(長押し + ドラッグはそのまま。画面ごとにどちらかを選ぶ)。
+  - ホスト: 実機のアプリの画面がスクロールでき、画面の外に矩形があるとドラッグを横取りしていたので止めた。Host API / ABI は不変。
+  - 確認: 実機・Linux の回帰 3 本 PASS。metronome の highmark の基準は 33,576(appui などで `.wasm` 3.7 → 7.3KB)、
+    mp3player / hostapi_check は不変。開始時の `free_int` 150,264 / `largest_int` 98,304(Phase 22a と同じ)。
+  - 実機は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームで残してある。
