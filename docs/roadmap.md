@@ -33,6 +33,7 @@ Host API・ホスト・ランタイム・SDK・検証基盤のフェーズ。**S
 | **22** | **回帰アプリの統合と、タップの自動化** | **done**(2026-09-27) | **回帰を metronome / mp3player + 検査アプリ `hostapi_check`(`wasm-apps/dev/`)の 3 本に**(touch_demo 削除、seq_smoke を吸収、midi_loopback / synth_probe を `wasm-apps/dev/` へ)。**既定のファームは実用アプリだけ**(`KYBOTOS_DEV_APPS=ON` で検査用・診断用を埋め込む)。**実機はシリアルコンソール(`tap` / `hold` / `drag` / `key` / `texts` / `rm`)、Linux は `KYBOTOS_CMD_FIFO` から注入**し、画面の文字で判定(シナリオ `SCENARIO[<app>]`、`scripts/regress-scenario.sh`)。**実機の回帰 147 → 45 秒**、Linux は xdotool 不要に。**Host API / ABI 不変**、metronome / mp3player の highmark 不変。workflow §1-8 を改訂(ユーザー承認)。`docs/results/phase22.md` | 21f |
 | **22a** | **起動からメニュー表示までの UI の改善** | **done**(2026-09-27) | **演奏者・作曲者に WASM を意識させない**。起動時にロゴ(`docs/images/kybotos.png`)のスプラッシュを最短 1.5 秒、メニューの題名を `Kybotos Menu` に、アプリ名から `.wasm` を取った(実機・Linux)。**メニューの背景もスプラッシュと同じ濃い緑に**(配色は `shared/launcher_theme.h`)。**スプラッシュで起動音**(`docs/sounds/kybotos.mp4` を PCM にして両ホストのミキサで 1 回)。ロゴは RGB565 の配列を `shared/` で共有(flash +115KB)。**Host API / ABI 不変**、回帰 3 本 PASS、開始時の free_int −40 B(一度きり)。`docs/results/phase22a.md` | 22 |
 | **22b** | **metronome を磨く**(サンプルアプリとしての統一感と、単機能アプリとしての簡素さ) | **done**(2026-10-04) | タイトル `Metronome`、ヘッダ + ステータス行 + 黒の本体、▶ / ■、**巨大な BPM と拍子(7 セグメントを `fill_rect` で)**、拍の枠(1〜16 拍を 1 段)、**拍子 1〜16 / 2・4・8・16(拍は分母の音符)**、配色はメニューに合わせる。**操作は実機を触って 4 回作り直し、上下のはじきで ±1、BPM は押したままで ±5 → ±10** に決めた(ui-conventions に語彙として追加)。ヘッダ `120bpm 4/4`。実機のアプリの画面のスクロールを止めた(ホスト)。**Host API / ABI 不変**、回帰 3 本 PASS、metronome の highmark 33,576。仕様書 `docs/apps/metronome/spec.md`、`docs/results/phase22b.md` | 22a |
+| **22c** | **mp3player を磨く**(サンプルアプリとしての統一感を metronome に揃える) | **in progress**(2026-10-04〜) | タイトルの `(wasm)` と `state:` の行を消す、ヘッダ + ステータス行 + 黒の本体(22b と同じ骨格・配色)、**再生 / 一時停止 / 停止をステータス行の記号に**(一時停止の載せ方はステップ 0 で決める)、**一覧のスクロールを縦スワイプに**(`^` / `v` を消す)。**Host API / ABI 不変**、回帰 3 本 PASS、mp3player の highmark を取り直す。仕様書 `docs/apps/mp3player/spec.md`。U-26 の mp3player の部分を消化する。`docs/prompts/phase22c.md` | 22b |
 | 23〜 | 候補: **U-22 の対策(案 A: SYNTH の発音を出力バッファの深さぶん前倒しし `at_host_us` でブロック内に置く。内蔵音源全体に関わる)**、既存アプリの操作規約の統一(U-26)、音色(U-27) | deferred | — | 22 |
 
 ### Sequencer App(2026-09-27 に終了)
@@ -84,6 +85,7 @@ Sequencer アプリは非公開の app-sequencer で開発している(2026-09-2
 
 | 日付 | 変更 |
 |---|---|
+| 2026-10-04 | **Phase 22c(mp3player を磨く)の指示書を作成した**(`docs/prompts/phase22c.md`)。ユーザーの指示: 22b と同じくアプリ表示の統一感が一番の目的で、`(wasm)` と `state:` の行を消す、metronome と統一した再生 / 停止のボタン、スクロールはボタンでなくスワイプ。**一時停止は MP3 プレーヤーとして必須**で、▶ / ■ の規約への載せ方はステップ 0 で決める |
 | 2026-10-04 | **Phase 22b(metronome を磨く)完了**(`docs/results/phase22b.md`)。ユーザーが実機を触って操作を決めた(指示書の追記 1〜4): 長押しをやめ、値は上下のはじきで ±1、BPM は押したままで ±5 → ±10、ヘッダに拍子も出す。U-26 の metronome の部分を消化 |
 | 2026-10-03 | **Phase 22b(metronome を磨く)の指示書を作成した**(`docs/prompts/phase22b.md`)。ユーザーの指示: Kybotos のサンプルアプリとしての統一感(タイトル・再生 / 停止・BPM・拍子の指定を Sequencer に合わせる)と単機能アプリとしての簡素さ(BPM と拍子は極端に目立ってよい)、拍の進み具合の表示は作り直す、配色はメニューに合わせて背景は黒(焼き付き対策)、`(wasm)` を消す。トレードオフはステップ 0 で決める。mp3player は本フェーズの結果を見て後で |
 | 2026-09-27 | **Phase 22a(起動からメニュー表示までの UI の改善)を追加し、完了した**(`docs/prompts/phase22a.md` / `docs/results/phase22a.md`)。ユーザーの指示: 使うのは演奏者・作曲者なので UI で WASM を意識させない(スプラッシュ、`Kybotos Menu`、拡張子を出さない) |
