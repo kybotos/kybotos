@@ -24,7 +24,7 @@ typedef enum {
 } VoiceKind;
 
 typedef struct {
-    VoiceKind kind;
+    uint8_t kind;        /* VoiceKind。C の enum は 4 B なので 1 B で持つ(実機の internal RAM。docs/results/phase23.md ステップ 3) */
     uint8_t note;        /* SYNTH のとき。ボイス奪取の判定に使う */
     uint32_t seq;        /* 発音順。最も古いものを奪うため */
     int remaining;       /* 残りフレーム(0 = idle) */

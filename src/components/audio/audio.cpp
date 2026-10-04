@@ -2,6 +2,7 @@
 #include "audio.hpp"
 #include "clock_authority.hpp"
 #include "boot_sound.h"      // Phase 22a 追記: 起動音
+#include "synth_voice.h"     // Phase 23: 内蔵音源のボイス(両ホスト共有)
 #include "esp_log.h"
 #include "driver/i2s_std.h"
 #include <cstring>
@@ -150,34 +151,19 @@ bool Mp3Player::init_i2s_only(uint32_t sample_rate_hz, uint8_t bits, bool stereo
 // (7B-fix の根拠がそのまま消える)。Linux ホストは元から pull 型ミキサで二重クリックが
 // 起きていなかったことも、この読みの裏づけである(docs/results/phase07.md 7B-fix)。
 //
-// 合成はキャッシュレス: サインは再帰振動子(回転行列)、ノイズは xorshift32。
-// サンプルごとに libm を呼ばない。音色の式は Linux ホスト(hosts/linux/hostapi_sdl.c)と同一。
+// ボイス(合成の式と定数)は shared/synth_voice.c(Phase 23。それまでは Linux の hostapi_sdl.c と
+// 同じコードをここにも持っていた)。ここに残るのはミキサ(発音要求のキュー、240 フレームのブロック、
+// 起動音、MP3 との排他、I2S への書き込み)。**synthv_* はミキサタスクからだけ呼ぶ**(別のタスクからの
+// リセットは s_synth_reset_req で頼む)。
 //
 // MP3 とは **排他**: esp_audio_player が同じ I2S へ write_fn から書くので、
 // MP3 再生中はミキサを止める(発音要求は捨てる)。docs/results/phase21.md 0-b。
 
 namespace {
 
-constexpr int kMixRate = 44100;
+constexpr int kMixRate = SYNTHV_RATE;
 constexpr int kMixBlock = 240; // I2S_CHANNEL_DEFAULT_CONFIG の dma_frame_num と同じ
 constexpr int kRingBlocks = 6; // 同 dma_desc_num。リング 1 周ぶん
-
-enum VoiceKind : uint8_t { VK_IDLE = 0, VK_TONE, VK_KICK, VK_SNARE, VK_HAT, VK_CRASH, VK_WOOD };
-
-struct Voice {
-    VoiceKind kind;
-    uint8_t note;
-    uint32_t seq;
-    int remaining;
-    float s, c, cw, sw;   // サイン(再帰振動子)
-    float decay, amp;
-    float f_cur, f_end, f_k; // ピッチ掃引(Kick)
-    uint32_t rng;            // ノイズ
-    float n_prev, n_amp, n_decay;
-};
-
-Voice s_voices[HOSTAPI_SYNTH_VOICES];
-uint32_t s_voice_seq;
 
 // ミキサのバッファはタスクスタックではなく静的に置く(恒久物は静的確保: 6B / 7B-fix)
 int32_t s_acc[kMixBlock];
@@ -195,162 +181,10 @@ std::atomic<bool> s_boot_req{false};
 int s_boot_pos = BOOT_SOUND_FRAMES; // BOOT_SOUND_FRAMES = 鳴っていない
 int s_boot_gain = 0;                // マスター音量(0..100)。開始時に固定
 
-void voice_set_sine(Voice* v, float freq, int frames, float amp)
-{
-    const float w = 2.0f * (float)M_PI * freq / kMixRate;
-    v->s = 0.0f;
-    v->c = 1.0f;
-    v->cw = cosf(w);
-    v->sw = sinf(w);
-    v->amp = amp;
-    v->decay = expf(-3.5f / (float)(frames > 0 ? frames : 1));
-    v->remaining = frames;
-}
-
-// 空きボイス → 同じ note の最も古いもの → 全体で最も古いもの(hostapi_defs.h の契約)
-Voice* voice_alloc(uint8_t note)
-{
-    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
-        if (s_voices[i].kind == VK_IDLE || s_voices[i].remaining <= 0) return &s_voices[i];
-    }
-    Voice* best = nullptr;
-    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
-        if (s_voices[i].note == note && (!best || s_voices[i].seq < best->seq)) best = &s_voices[i];
-    }
-    if (!best) {
-        for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
-            if (!best || s_voices[i].seq < best->seq) best = &s_voices[i];
-        }
-    }
-    return best;
-}
-
-void voice_start_tone(const Mp3Player::ToneMsg& t, int master_vol)
-{
-    Voice* v = voice_alloc(0);
-    if (!v) return;
-    memset(v, 0, sizeof(*v));
-    v->kind = VK_TONE;
-    v->seq = ++s_voice_seq;
-    voice_set_sine(v, (float)t.freq_hz, kMixRate * t.dur_ms / 1000,
-                   12000.0f * t.level / 100.0f * master_vol / 100.0f * s_gain_click / 100.0f);
-}
-
-// 基準レベルは **4 音同時 + クリックでクリップしない**ように決めた
-// (Linux の WAV で実測。4 音同時のピーク 19,839 / -4.3dBFS)
-void voice_start_drum(uint8_t note, uint8_t velocity, int master_vol)
-{
-    const float g = (float)velocity / 127.0f * (float)master_vol / 100.0f
-                    * (float)s_gain_synth / 100.0f;
-    Voice* v = voice_alloc(note);
-    if (!v) return;
-    memset(v, 0, sizeof(*v));
-    v->seq = ++s_voice_seq;
-    v->note = note;
-    v->rng = 0x9E3779B9u ^ (uint32_t)note ^ (s_voice_seq << 8);
-    switch (note) {
-    case HOSTAPI_SYNTH_NOTE_KICK:
-        v->kind = VK_KICK;
-        voice_set_sine(v, 110.0f, kMixRate * 180 / 1000, 7000.0f * g);
-        v->f_cur = 110.0f;
-        v->f_end = 45.0f;
-        v->f_k = expf(-1.0f / ((float)kMixRate * 0.040f));
-        break;
-    case HOSTAPI_SYNTH_NOTE_SNARE:
-        v->kind = VK_SNARE;
-        voice_set_sine(v, 190.0f, kMixRate * 140 / 1000, 2800.0f * g);
-        v->n_amp = 5600.0f * g;
-        v->n_decay = expf(-4.5f / (float)(kMixRate * 140 / 1000));
-        break;
-    case HOSTAPI_SYNTH_NOTE_CHH:
-        v->kind = VK_HAT;
-        v->remaining = kMixRate * 45 / 1000;
-        v->n_amp = 5600.0f * g;
-        v->n_decay = expf(-5.0f / (float)v->remaining);
-        break;
-    case HOSTAPI_SYNTH_NOTE_CRASH:
-        v->kind = VK_CRASH;
-        v->remaining = kMixRate * 800 / 1000;
-        v->n_amp = 5600.0f * g;
-        v->n_decay = expf(-4.0f / (float)v->remaining);
-        break;
-    case HOSTAPI_SYNTH_NOTE_METRO_CLICK:
-    case HOSTAPI_SYNTH_NOTE_METRO_BELL: {
-        // メトロノーム(Phase 21c)。ウッドブロック系の短い共鳴音: 減衰サイン + 4ms で消えるノイズ
-        // (叩いた瞬間のアタック)。**Bell は Click より高く長く鳴る**(明るく目立つ)。
-        // 中〜高域に置くのは内蔵スピーカーが低域を出さないため(所感 D-1)。
-        // **式と定数は Linux の hostapi_sdl.c と同じにすること**
-        const bool bell = (note == HOSTAPI_SYNTH_NOTE_METRO_BELL);
-        v->kind = VK_WOOD;
-        voice_set_sine(v, bell ? 2000.0f : 1200.0f, kMixRate * (bell ? 150 : 60) / 1000, 8000.0f * g);
-        v->n_amp = 3000.0f * g;
-        v->n_decay = expf(-5.0f / ((float)kMixRate * 0.004f));
-        break;
-    }
-    default:
-        v->kind = VK_IDLE; // 未知の note は何もしない(ログも出さない)
-        v->remaining = 0;
-        break;
-    }
-}
-
-inline float voice_noise(Voice* v)
-{
-    v->rng ^= v->rng << 13;
-    v->rng ^= v->rng >> 17;
-    v->rng ^= v->rng << 5;
-    return (float)((int32_t)v->rng) * (1.0f / 2147483648.0f);
-}
-
-// n フレームを acc にミックスする。**サンプル再生に差し替えるときはこの関数だけ**
-void voice_render(Voice* v, int32_t* acc, int n)
-{
-    if (v->remaining <= 0) { v->kind = VK_IDLE; return; }
-    if (n > v->remaining) n = v->remaining;
-
-    if (v->kind == VK_KICK) {
-        // ピッチ掃引はブロック単位で係数を作り直す(サンプルごとに cosf を呼ばない)
-        v->f_cur = v->f_end + (v->f_cur - v->f_end) * powf(v->f_k, (float)n);
-        const float w = 2.0f * (float)M_PI * v->f_cur / kMixRate;
-        v->cw = cosf(w);
-        v->sw = sinf(w);
-    }
-
-    for (int i = 0; i < n; i++) {
-        float out = 0.0f;
-        switch (v->kind) {
-        case VK_TONE:
-        case VK_KICK:
-        case VK_SNARE:
-        case VK_WOOD: {
-            const float s2 = v->s * v->cw + v->c * v->sw;
-            v->c = v->c * v->cw - v->s * v->sw;
-            v->s = s2;
-            v->amp *= v->decay;
-            out = v->amp * v->s;
-            if (v->kind == VK_SNARE || v->kind == VK_WOOD) {
-                v->n_amp *= v->n_decay;
-                out += v->n_amp * voice_noise(v);
-            }
-            break;
-        }
-        case VK_HAT:
-        case VK_CRASH: {
-            const float x = voice_noise(v);
-            const float hp = x - v->n_prev; // 1 次ハイパス(差分)
-            v->n_prev = x;
-            v->n_amp *= v->n_decay;
-            out = v->n_amp * hp;
-            break;
-        }
-        default:
-            break;
-        }
-        acc[i] += (int32_t)out;
-    }
-    v->remaining -= n;
-    if (v->remaining <= 0) v->kind = VK_IDLE;
-}
+// ボイスのリセットの要求(Phase 23)。Synth_Reset は WASM のタスク(アプリの起動 / 破棄)から呼ばれるので、
+// ボイスには触らずフラグだけ立て、ミキサタスクが次のブロックの頭で synthv_reset する(最大 1 ブロック = 5.4ms 後)。
+// 発音要求のキューはこれまでどおりその場で空にする
+std::atomic<bool> s_synth_reset_req{false};
 
 } // namespace
 
@@ -382,9 +216,10 @@ void Mp3Player::set_gain(uint8_t mp3, uint8_t synth, uint8_t click) noexcept {
 }
 
 void Mp3Player::synth_reset() noexcept {
-    // 鳴っているボイスを消す(transport_stop / アプリ破棄。hostapi_defs.h の契約)
+    // 鳴っているボイスを消す(アプリの起動 / 破棄。hostapi_defs.h の契約)。
+    // ボイスはミキサタスクが次のブロックの頭で消す(s_synth_reset_req)
     if (tone_queue_) xQueueReset(tone_queue_);
-    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) s_voices[i].kind = VK_IDLE;
+    s_synth_reset_req.store(true);
 }
 
 // タスクスタック等は静的確保(BSS)。ヒープから取ると最大連続ブロックを
@@ -418,7 +253,8 @@ void Mp3Player::ensure_click_task() noexcept {
 //     新しいレートで鳴ることがない
 void Mp3Player::flush_silence() noexcept
 {
-    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) s_voices[i].kind = VK_IDLE;
+    synthv_reset();                    // ミキサタスクから呼ばれる
+    s_synth_reset_req.store(false);    // 済んだので、溜まっていた要求も消す
     s_boot_pos = BOOT_SOUND_FRAMES;
     if (tone_queue_) xQueueReset(tone_queue_);
     if (!tx_ || !enabled_) return;
@@ -460,12 +296,14 @@ void Mp3Player::click_task_loop() noexcept {
             if (!ensure_i2s(kMixRate, 16, true)) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
         }
 
-        // ブロックの先頭で、溜まっている発音要求をすべて開始する
+        // ブロックの先頭で、頼まれていればボイスを消し(Synth_Reset)、溜まっている発音要求をすべて開始する。
+        // **リセットが先**: Synth_Reset はキューをその場で空にするので、キューに残っているのはその後の要求
+        if (s_synth_reset_req.exchange(false)) synthv_reset();
         const int vol = volume_.load();
         ToneMsg msg;
         while (xQueueReceive(tone_queue_, &msg, 0) == pdTRUE) {
-            if (msg.velocity) voice_start_drum(msg.note, msg.velocity, vol);
-            else              voice_start_tone(msg, vol);
+            if (msg.velocity) synthv_start_drum(msg.note, msg.velocity, vol, s_gain_synth);
+            else              synthv_start_tone(msg.freq_hz, msg.dur_ms, msg.level, vol, s_gain_click);
         }
         if (s_boot_req.exchange(false)) {
             s_boot_pos = 0;
@@ -473,10 +311,7 @@ void Mp3Player::click_task_loop() noexcept {
         }
 
         memset(s_acc, 0, sizeof(s_acc));
-        bool any = false;
-        for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) {
-            if (s_voices[v].kind != VK_IDLE) { voice_render(&s_voices[v], s_acc, kMixBlock); any = true; }
-        }
+        bool any = synthv_render(s_acc, kMixBlock);
         if (s_boot_pos < BOOT_SOUND_FRAMES) {
             const int n = (BOOT_SOUND_FRAMES - s_boot_pos < kMixBlock) ? BOOT_SOUND_FRAMES - s_boot_pos : kMixBlock;
             for (int i = 0; i < n; i++) s_acc[i] += boot_sound_pcm[s_boot_pos + i] * s_boot_gain / 100;
