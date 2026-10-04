@@ -167,3 +167,58 @@ probe-new-2.wav      1024   8.00  16708    427.5     22    68.70    58.42    74.
 
 **途中のつまずき**: 比較スクリプトを書き換える Python をシェルのヒアドキュメントで渡したら、Python の中に `EOF` だけの行があってそこで切れ、
 残りの行をシェルが実行した(`/main.c: Permission denied` で止まった)。作業ツリーに変化が無いことを `git status` で確かめ、Python をファイルにして実行し直した。
+
+## ステップ 3: 実機の切り替え(2026-10-04)
+
+**変更**
+
+- `src/components/audio/audio.cpp`: `VoiceKind` / `Voice` / `s_voices` / `s_voice_seq` と `voice_*` の 6 関数を削除した。
+  ミキサタスクからは `synthv_start_drum(note, vel, vol, s_gain_synth)` / `synthv_start_tone(freq, dur, level, vol, s_gain_click)` / `synthv_render` を呼ぶ。
+  `kMixRate` は `SYNTHV_RATE` から取る。
+- `src/components/audio/CMakeLists.txt`: `SRCS` に `shared/synth_voice.c` を足した(`boot_sound.c` と同じ形)。
+- **リセットはミキサタスクに頼む形にした**(ステップ 0 で扱っていなかった点)。
+  - `Synth_Reset`(= `Mp3Player::synth_reset`)は、アプリの起動 / 破棄のときに **WASM のタスク**から呼ばれる(`hostapi.cpp` の `hostapi_audio_reset`)。
+  - これまでは別のタスクから `kind = VK_IDLE` を書くだけだったが、`synthv_reset` は構造体ごと 0 にする。そこで、起動音と同じく **atomic のフラグ `s_synth_reset_req` を立てるだけ**にした。
+  - ミキサタスクが**次のブロックの頭で、発音要求を取り出す前に** `synthv_reset` する(最大 1 ブロック = 5.4ms 後。出力の DMA リングは約 33ms なので、聞こえ方は変わらない)。
+    発音要求のキューは、これまでどおりその場で空にする。
+  - MP3 との受け渡しの `flush_silence` はミキサタスクの中なので、そのまま `synthv_reset` を呼び、溜まっていた要求のフラグも下ろす。
+  - Linux は、`host_sdl_audio_reset` がオーディオのロックの下で `synthv_reset` を呼ぶので、このままでよい。
+- **`Voice::kind` を 1 B で持つようにした**(`shared/synth_voice.c`)。
+  - 最初の実機の回帰で、開始時の `free_int` が Phase 22e の 150,240 から **150,200(−40 B)** に下がった。
+  - 理由は、C の enum が 4 B であること(実機の C++ は `enum VoiceKind : uint8_t` の 1 B だった)。8 ボイスで +32 B になる。
+  - `uint8_t kind` にして作り直したら **150,232(−8 B)** になった。残る 8 B は `s_synth_reset_req` と境界合わせ。
+  - 音の計算には関わらないので、ctest(60 ケースの一致を含む)はそのまま PASS。
+
+**確認**
+
+| 項目 | 結果 |
+|---|---|
+| 実機のビルド(`KYBOTOS_DEV_APPS=ON`) | 警告 0。`kybotos.bin` 0x12f150。`src/dependencies.lock` は変わっていない |
+| 実機の回帰 3 本(`captures/phase23-device2/report.md`) | **PASS**。開始時の free_int **150,232**(22e 比 −8 B)、largest_int 98,304、metronome の反復 3 回 +0、mp3player −472 / hostapi_check −176(`EXPECT_DELTA` どおり)、WARN / ERROR 0 件 |
+| 実機の WAMR プール | metronome の highmark **25,744**(Phase 22e と同じ) |
+| Linux(`kind` を変えた後) | ctest 3/3 PASS、回帰 3 本 PASS(highmark 33,576 / 27,208 / 34,728、ステップ 2 と同じ) |
+| 比較スクリプト(`a97a9b4`) | `synth-voice-compare.sh`: 実機のコード(切り替え前)と共通の C で 60 ケース一致 |
+| **耳**(ユーザー、`captures/phase23-ear/`。カメラの音 −18.5 dB) | **metronome**(120bpm 4/4、小節頭の Bell と Click): 「**同じに聞こえる**」。**synth_probe**(4 音同時、16 分のハイハット、クリックとの重なり、12 音の奪取、小節 8〜12 の MP3 の後にドラムが戻る): 「**同じに聞こえる**」 |
+| 実機の普段使いへの復帰 | `KYBOTOS_DEV_APPS=OFF` でビルド(0x12b1c0)・書き込み。SD の hostapi_check / midi_loopback / synth_probe をシリアルの `rm` で消した |
+
+**観察(Phase 23 の変更とは関係しない)**: 耳での確認で、`synth_probe` を止めたら free_int が 256 B 減った(`captures/phase23-ear/monitor.log`)。
+ボイスはヒープを使わないので、MP3 の経路を疑って、リセット直後に `synth_probe` を 3 回続けて回した(MP3 が止まった後の 28 秒で止める)。
+結果は **−36 / +0 / +0**(`captures/phase23-probe-heap/monitor.log`)で、U-23 の「起動後に初めて MP3 を鳴らしたときの一度きりの確保」と同じ。
+−256 B のときは **MP3 が鳴っている最中(小節 12 の直前)にアプリを止めた**ので、別の一度きりの経路を通ったとみている(U-23 と同じ種類。切り分けはしていない)。
+
+## ステップ 4: 文書(2026-10-04)
+
+- `docs/architecture.md` §11-12 に、ボイスの置き場所(`shared/synth_voice.c`)と、ミキサに残るものを書いた。
+- `docs/lessons.md` に「ボイスを共通の C に寄せる(Phase 23)」の節を足した(実際に鳴らした WAV は同じコードでも一致しない、float の掛ける順、C と C++ の enum の大きさ、別のタスクからのリセット)。
+- `docs/workflow.md` は変えない。§3.8 の「数値で判定できる」の表に、`scripts/wav_summary.py` を手順として足すほどの汎用性はまだ無い(今回の比較だけで使った)と判断した。
+- `docs/roadmap.md` / `docs/status.md` を更新した。
+- コメントの「式と定数は〜と同じにすること」は、両ホストから消えた(ボイスのコードごと削除したため)。
+
+## 完了条件の確認
+
+| 完了条件 | 結果 |
+|---|---|
+| 1. ボイスの実装が `shared/synth_voice.c` の 1 本だけになっている | ✅(Linux はステップ 2、実機はステップ 3) |
+| 2. 切り出しの前後で出力が一致する(追記のとおり言い換えた) | ✅ オフライン: 60 ケースのハッシュが一致(ctest)。実機に近い経路: `synth_probe` の WAV のピーク・rms・オンセットの数が一致 |
+| 3. 回帰 3 本 PASS(Linux・実機)、Host API / ABI・`.wasm` は不変 | ✅ |
+| 4. 記録 | ✅ この文書 |

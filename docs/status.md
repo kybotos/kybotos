@@ -924,3 +924,10 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - `-` / `+` を削除。数字は上下のはじきで ±1・押したままで ±5 → ±10(metronome と同じ)、バーはタップでその位置の値・押したまま左右でスクラブ。
   - 確認: 実機・Linux の回帰 3 本 PASS、`master_ui_test`(偽の時計)PASS。Host API / ABI・`.wasm` は不変。開始時の free_int 150,240(−24 B)。
   - 実機は普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、検査用アプリを消してある。
+
+- **Phase 23(内蔵音源のボイスを共通の C に寄せる)完了。** 詳細は `docs/results/phase23.md`。
+  - ボイスの合成(tone、ドラム 4 音、メトロノームの Wood、8 ボイスの奪取)を `shared/synth_voice.{h,c}` に切り出し、実機・Linux の両方が使う。
+    それまでは `audio.cpp` と `hostapi_sdl.c` に同じコードがあり、手で揃えていた。
+  - 音は変えていない: 単体テスト `synth_voice_test`(切り出し前と 60 ケースのハッシュが一致、奪取の規則)、`synth_probe` の WAV の統計、ユーザーの耳。
+  - 確認: 実機・Linux の回帰 3 本 PASS。Host API / ABI・`.wasm` は不変。開始時の free_int 150,232(−8 B)、highmark 不変。
+  - 実機は普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、検査用アプリを消してある。
