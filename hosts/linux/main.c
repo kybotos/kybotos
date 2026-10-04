@@ -35,15 +35,10 @@
 #define APP_TICK_MS 100
 #define MAX_APPS 32
 
-/* メニューレイアウト(320x240 論理座標) */
-/* メニューのいちばん上に置く `Settings` の行(Phase 21b)。アプリの index とは別物 */
+/* メニューレイアウト(320x240 論理座標)。形と配色は shared/launcher_theme.h(実機と共有。Phase 22d) */
+/* ヘッダ右の `Settings`(Phase 21b は一覧のいちばん上の行、Phase 22d でヘッダ右へ)。アプリの index とは別物 */
 #define MENU_SETTINGS_ROW (-2)
-#define MENU_ROW_X 10
-#define MENU_ROW_W 300
-#define MENU_ROW_Y0 32
-#define MENU_ROW_H 20
-#define MENU_ROW_GAP 2
-#define MENU_STATUS_Y 220
+#define MENU_SETTINGS_X 254 /* DejaVu 13pt の `Settings`(約 54px)の右端を MENU_SETTINGS_RIGHT にそろえる */
 
 #define SPLASH_MIN_MS 1500 /* 起動時のスプラッシュの表示時間(Phase 22a。実機と同じ最短時間) */
 
@@ -135,7 +130,7 @@ static void scan_apps(const char* dir)
     if (s_app_count == 0) {
         snprintf(s_status, sizeof(s_status), "no apps found");
     } else {
-        snprintf(s_status, sizeof(s_status), "%d app(s) - click to launch", s_app_count);
+        snprintf(s_status, sizeof(s_status), "%d app(s) - tap to launch", s_app_count);
     }
 }
 
@@ -275,32 +270,33 @@ static void app_unload(App* a, bool clean_stop)
 static void menu_render(int hover)
 {
     host_sdl_begin_frame(MENU_BG_RGB888);
-    host_sdl_text(10, 10, "Kybotos Menu", MENU_TITLE_RGB888); /* Phase 22a(旧 "WASM Apps (<dir>)") */
+    host_sdl_text(MENU_TITLE_X, MENU_TITLE_Y, "Kybotos Menu", MENU_TITLE_RGB888); /* Phase 22a(旧 "WASM Apps (<dir>)") */
+    host_sdl_rect(0, MENU_RULE_Y, 320, MENU_RULE_H, MENU_RULE_RGB888);           /* Phase 22d */
 
-    /* いちばん上に `Settings`(Phase 21b)。上端スワイプが使えない場面の受け皿 */
-    host_sdl_rect(MENU_ROW_X, MENU_ROW_Y0, MENU_ROW_W, MENU_ROW_H,
-                  (hover == MENU_SETTINGS_ROW) ? MENU_SETTINGS_HI_RGB888 : MENU_SETTINGS_BG_RGB888);
-    host_sdl_text(MENU_ROW_X + 8, MENU_ROW_Y0 + 2, "Settings", MENU_SETTINGS_TEXT_RGB888);
+    /* ヘッダ右に `Settings`(Phase 21b、22d で一覧の行からヘッダへ)。上端スワイプが使えない場面の受け皿 */
+    host_sdl_text(MENU_SETTINGS_X, MENU_TITLE_Y, "Settings",
+                  (hover == MENU_SETTINGS_ROW) ? MENU_SETTINGS_HI_RGB888 : MENU_SETTINGS_TEXT_RGB888);
 
     for (int i = 0; i < s_app_count; i++) {
-        const int y = MENU_ROW_Y0 + (i + 1) * (MENU_ROW_H + MENU_ROW_GAP);
+        const int y = MENU_ROW_Y0 + i * (MENU_ROW_H + MENU_ROW_GAP);
         if (y + MENU_ROW_H > MENU_STATUS_Y) break; /* あふれは表示しない(PoC) */
         host_sdl_rect(MENU_ROW_X, y, MENU_ROW_W, MENU_ROW_H,
                       (i == hover) ? MENU_APP_HI_RGB888 : MENU_APP_BG_RGB888);
-        host_sdl_text(MENU_ROW_X + 8, y + 2, s_apps[i].name, MENU_APP_TEXT_RGB888);
+        host_sdl_rect(MENU_ROW_X, y, MENU_ROW_MARK_W, MENU_ROW_H, MENU_APP_MARK_RGB888);
+        host_sdl_text(MENU_ROW_X + MENU_ROW_TEXT_X, y + 4, s_apps[i].name, MENU_APP_TEXT_RGB888);
     }
 
-    host_sdl_text(10, MENU_STATUS_Y, s_status, MENU_STATUS_RGB888);
+    host_sdl_text(MENU_TITLE_X, MENU_STATUS_Y, s_status, MENU_STATUS_RGB888);
     draw_master_overlay_if_open();
     host_sdl_present();
 }
 
 static int menu_hit_test(int lx, int ly)
 {
+    if (ly >= 0 && ly < MENU_RULE_Y) return (lx >= MENU_SETTINGS_HIT_X) ? MENU_SETTINGS_ROW : -1;
     if (lx < MENU_ROW_X || lx >= MENU_ROW_X + MENU_ROW_W) return -1;
-    if (ly >= MENU_ROW_Y0 && ly < MENU_ROW_Y0 + MENU_ROW_H) return MENU_SETTINGS_ROW;
     for (int i = 0; i < s_app_count; i++) {
-        const int y = MENU_ROW_Y0 + (i + 1) * (MENU_ROW_H + MENU_ROW_GAP);
+        const int y = MENU_ROW_Y0 + i * (MENU_ROW_H + MENU_ROW_GAP);
         if (ly >= y && ly < y + MENU_ROW_H) return i;
     }
     return -1;

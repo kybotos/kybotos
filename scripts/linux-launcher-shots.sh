@@ -12,7 +12,7 @@
 # 鳴っていた区間(ピークの 5% を超えた最初と最後)とピークを出す。
 # ログは captures/<タスク名>/host.log。**手動の確認用**(docs/workflow.md §3.6)。メニュー画面には
 # コマンドの入口(FIFO)が効かないので、タップは ui-linux.sh の xdotool の経路を使う(§1-8 の「手動の確認と撮影」)。
-# 前提のレイアウト(hosts/linux/main.c): Settings の行 y=32..52、1 行目のアプリ y=54..74。
+# 前提のレイアウト(shared/launcher_theme.h。Phase 22d): Settings はヘッダ右(x 220〜320、y 0〜28)、1 行目のアプリ y=38..62。
 set -u
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 TASK=${1:?usage: linux-launcher-shots.sh <task>}
@@ -29,7 +29,7 @@ sleep 0.5
 sleep 2
 "$REPO/scripts/screen-still.sh" "$OUT" menu
 
-UI_CAPTURE_DIR=$OUT "$REPO/scripts/ui-linux.sh" tap 100 64
+UI_CAPTURE_DIR=$OUT "$REPO/scripts/ui-linux.sh" tap 100 50
 for _ in $(seq 1 30); do grep -q "app started" "$OUT/host.log" && break; sleep 0.1; done
 sleep 0.5
 "$REPO/scripts/screen-still.sh" "$OUT" app

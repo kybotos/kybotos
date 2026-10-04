@@ -93,7 +93,7 @@ bool has_wasm_ext(const char* name)
     return strcasecmp(ext, ".wasm") == 0;
 }
 
-// メニューの `Settings` 行(Phase 21b)。**上端スワイプが使えない場面の受け皿**
+// メニューの `Settings`(Phase 21b。Phase 22d で一覧の行からヘッダ右へ)。**上端スワイプが使えない場面の受け皿**
 // (メニューではアプリスクリーンが無いのでスワイプの関所が働かない。
 //  ブラウザ版では上端スワイプを OS / ブラウザが先に取るので、そちらでも受け皿になる)
 void settings_row_event_cb(lv_event_t*)
@@ -125,28 +125,49 @@ void row_event_cb(lv_event_t* e)
 void create_menu_locked()
 {
     // 画面はランドスケープ 320x240(display.cpp: hres=LCD_V_RES, swap_xy)
+    // 形と配色は shared/launcher_theme.h(Linux と共有)。Phase 22d で背景を黒に、Settings をヘッダ右に
     s_menu_screen = lv_obj_create(nullptr);
-    // 配色はスプラッシュのロゴに合わせる(shared/launcher_theme.h。Phase 22a 追記)
     lv_obj_set_style_bg_color(s_menu_screen, lv_color_hex(MENU_BG_RGB888), 0);
 
     lv_obj_t* title = lv_label_create(s_menu_screen);
     lv_label_set_text(title, "Kybotos Menu");
     lv_obj_set_style_text_color(title, lv_color_hex(MENU_TITLE_RGB888), 0);
-    lv_obj_set_pos(title, 10, 8);
+    lv_obj_set_pos(title, MENU_TITLE_X, MENU_TITLE_Y);
+
+    // 題名の下の細い線(Phase 22d)
+    lv_obj_t* rule = lv_obj_create(s_menu_screen);
+    lv_obj_remove_style_all(rule);
+    lv_obj_set_size(rule, 320, MENU_RULE_H);
+    lv_obj_set_pos(rule, 0, MENU_RULE_Y);
+    lv_obj_set_style_bg_color(rule, lv_color_hex(MENU_RULE_RGB888), 0);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+
+    // ヘッダ右の `Settings`(Phase 21b は一覧の先頭の行、Phase 22d でヘッダ右へ)。上端スワイプが使えない場面の受け皿。
+    // 当たり判定は文字より広く、ヘッダの右(x MENU_SETTINGS_HIT_X〜320、y 0〜MENU_RULE_Y)
+    lv_obj_t* settings = lv_obj_create(s_menu_screen);
+    lv_obj_remove_style_all(settings);
+    lv_obj_set_size(settings, 320 - MENU_SETTINGS_HIT_X, MENU_RULE_Y);
+    lv_obj_set_pos(settings, MENU_SETTINGS_HIT_X, 0);
+    lv_obj_add_flag(settings, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t* settings_lbl = lv_label_create(settings);
+    lv_label_set_text(settings_lbl, "Settings");
+    lv_obj_align(settings_lbl, LV_ALIGN_TOP_RIGHT, -(320 - MENU_SETTINGS_RIGHT), MENU_TITLE_Y);
+    // 文字色は親に付けて継承させる(押している間はクリーム)
+    lv_obj_set_style_text_color(settings, lv_color_hex(MENU_SETTINGS_TEXT_RGB888), 0);
+    lv_obj_set_style_text_color(settings, lv_color_hex(MENU_SETTINGS_HI_RGB888), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(settings, settings_row_event_cb, LV_EVENT_CLICKED, nullptr);
 
     s_list_cont = lv_obj_create(s_menu_screen);
-    lv_obj_set_size(s_list_cont, 300, 164);
-    lv_obj_set_pos(s_list_cont, 10, 32);
-    lv_obj_set_style_bg_opa(s_list_cont, LV_OPA_TRANSP, 0); // 行だけを背景に並べる
-    lv_obj_set_style_border_width(s_list_cont, 0, 0);
-    lv_obj_set_style_pad_all(s_list_cont, 6, 0);
+    lv_obj_remove_style_all(s_list_cont); // 行だけを黒の上に並べる(余白・枠・角丸なし)
+    lv_obj_set_size(s_list_cont, MENU_ROW_W, MENU_STATUS_Y - 16 - MENU_ROW_Y0); // 6 行で状態行の手前まで
+    lv_obj_set_pos(s_list_cont, MENU_ROW_X, MENU_ROW_Y0);
     lv_obj_set_flex_flow(s_list_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(s_list_cont, 6, 0);
+    lv_obj_set_style_pad_row(s_list_cont, MENU_ROW_GAP, 0);
 
     s_status_lbl = lv_label_create(s_menu_screen);
     lv_label_set_text(s_status_lbl, "");
     lv_obj_set_style_text_color(s_status_lbl, lv_color_hex(MENU_STATUS_RGB888), 0);
-    lv_obj_set_pos(s_status_lbl, 10, 204);
+    lv_obj_set_pos(s_status_lbl, MENU_TITLE_X, MENU_STATUS_Y - 16);
     lv_label_set_long_mode(s_status_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_status_lbl, 300);
 
@@ -155,18 +176,23 @@ void create_menu_locked()
     wasmrt::hostapi_masterui_attach_menu(s_menu_screen); // Phase 21b
 }
 
-// メニューの行のボタン(配色は shared/launcher_theme.h)。影は付けず、押している間は hi の色
+// メニューの行のボタン(配色と形は shared/launcher_theme.h。Phase 22d): 暗い緑の地 + 左端に中緑の印、文字は左寄せ。
+// 角丸・影は付けず、押している間は hi の地
 lv_obj_t* create_row_locked(uint32_t bg, uint32_t hi, uint32_t text_color, const char* text)
 {
     lv_obj_t* row = lv_button_create(s_list_cont);
-    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), MENU_ROW_H);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(row, lv_color_hex(bg), 0);
     lv_obj_set_style_bg_color(row, lv_color_hex(hi), LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(row, 0, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_border_width(row, MENU_ROW_MARK_W, 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(MENU_APP_MARK_RGB888), 0);
     lv_obj_t* label = lv_label_create(row);
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(text_color), 0);
-    lv_obj_center(label);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, MENU_ROW_TEXT_X - MENU_ROW_MARK_W, 0);
     return row;
 }
 
@@ -175,12 +201,7 @@ void rebuild_list_locked()
 {
     lv_obj_clean(s_list_cont);
 
-    // **いちばん上に `Settings`**(アプリの一覧より前。Phase 21b)
-    {
-        lv_obj_t* row = create_row_locked(MENU_SETTINGS_BG_RGB888, MENU_SETTINGS_HI_RGB888,
-                                          MENU_SETTINGS_TEXT_RGB888, "Settings");
-        lv_obj_add_event_cb(row, settings_row_event_cb, LV_EVENT_CLICKED, nullptr);
-    }
+    // `Settings` は一覧ではなくヘッダ右(Phase 22d。create_menu_locked)
 
     DIR* dir = opendir(wasmrt::kAppsDir);
     if (!dir) {

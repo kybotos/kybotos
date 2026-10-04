@@ -913,3 +913,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - 骨格・配色・記号の定数を `appui::theme` にまとめ、metronome も使う(metronome の `.wasm` は同一)。Linux ホストに ‖ の図形を足した。Host API / ABI は不変。
   - 確認: 実機・Linux の回帰 3 本 PASS。mp3player の highmark の基準は 27,208、`EXPECT_DELTA[mp3player]` は −472(再生中の曲の切り替えの一度きりの確保。U-23)。
   - 実機は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームで残してある。
+
+- **Phase 22d(Kybotos Menu の配色を見直す)完了。** 詳細は `docs/results/phase22d.md`。
+  - メニューの背景を黒にし、題名の下に中緑の細線、行は暗い緑の地 + 左端の印、`Settings` を一覧の行からヘッダ右へ移した。実機と Linux の形を揃えた。
+  - 確認: 実機・Linux の回帰 3 本 PASS(数値は 22c と同じ)。Host API / ABI・`.wasm` は不変。
+  - 実機は普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、検査用アプリを消してある。
