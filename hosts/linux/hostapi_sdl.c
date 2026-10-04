@@ -1051,7 +1051,8 @@ static void draw_char8x8(int32_t x, int32_t y, unsigned char c)
 /* Phase 18b: 実機のフォント(LVGL Montserrat + FontAwesome サブセット)にある
  * U+F04B(▶)/ U+F04D(■)は DejaVu に無い。アプリが両ホストで同じバイト列を書けるよう、
  * これらだけホスト側が図形として描く。戻り値は進めた幅(px)、0 = 記号ではない。
- * Phase 19a で U+F00D(✕、タイルの削除)、Phase 21f で U+F079(⟲、リピートのトグル)を追加した */
+ * Phase 19a で U+F00D(✕、タイルの削除)、Phase 21f で U+F079(⟲、リピートのトグル)、
+ * Phase 22c で U+F04C(‖、mp3player の一時停止)を追加した */
 #define SYM_W 12
 static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
 {
@@ -1115,6 +1116,12 @@ static int draw_symbol(int x, int y, const unsigned char* p, uint32_t rgb888)
             r.x = x + 9 + i;  r.y = y + 1 + i; SDL_RenderFillRect(s_renderer, &r);
             r.x = x + 2 - i;  r.y = y + 8 + i; SDL_RenderFillRect(s_renderer, &r);
         }
+        return SYM_W;
+    }
+    if (p[2] == 0x8C) { /* U+F04C ‖(Phase 22c、一時停止): 縦棒 2 本 */
+        r.y = y + 1; r.w = 3; r.h = 10;
+        r.x = x + 2; SDL_RenderFillRect(s_renderer, &r);
+        r.x = x + 7; SDL_RenderFillRect(s_renderer, &r);
         return SYM_W;
     }
     if (p[2] == 0x8D) { /* U+F04D ■ */

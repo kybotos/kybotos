@@ -92,40 +92,25 @@ impl SeqEvent {
     }
 }
 
-// ---- 配色(Phase 22b。shared/launcher_theme.h のメニューの色から。本体は焼き付きを避けて黒)----
-const HDR_BG: u32 = 0x18_3c_29; // ヘッダ: メニューの背景と同じ濃緑(MENU_BG_RGB888)
-const STA_BG: u32 = 0x0b_14_0f; // ステータス行: 黒に近い緑
-const BODY_BG: u32 = 0x00_00_00;
-const TXT_CREAM: u32 = 0xf3_f1_e4; // 題名・数字(MENU_TITLE_RGB888)
-// 状態の色は対話規約(docs/design/ui-conventions.md §4)。アプリをまたいで同じ
-const TXT_ON: u32 = 0x40_e0_70; // ▶
-const TXT_STOP: u32 = 0xf0_60_60; // ■
-const TXT_EDIT: u32 = 0xff_e0_60; // 値の変更中(点滅)
-const TXT_HINT: u32 = 0x5f_74_66; // 手引き: くすんだ緑
+// ---- 配色と骨格(Phase 22b。Phase 22c で mp3player と共有するため appui::theme へ移した)----
+// メニュー(shared/launcher_theme.h)の色に合わせ、本体は焼き付きを避けて黒。状態の色は ui-conventions §4。
+// ヘッダ(26px)+ ステータス行(24px)は Sequencer と同じ骨格
+use appui::theme::{
+    BODY_BG, BODY_Y, HDR_BG, HDR_H, HINT_X, PLAY_HIT_X, PLAY_X, STA_BG, STA_H, STA_TEXT_Y, STA_Y, SYM_PLAY,
+    SYM_STOP, TITLE_X, TITLE_Y, TXT_CREAM, TXT_EDIT, TXT_HINT, TXT_ON, TXT_STOP,
+};
 const BEAT_OFF: u32 = 0x1c_26_20; // 拍の枠(消灯)
-const BEAT_ON: u32 = 0x8f_d1_8b; // 拍の枠(点灯): 若葉
+const BEAT_ON: u32 = appui::theme::LEAF; // 拍の枠(点灯): 若葉
 const BEAT_ACCENT: u32 = 0xf0_a0_40; // 1 拍目: 橙(ステップ 0 の D6)
 
-// ---- ヘッダ(26px)+ ステータス行(24px)。Sequencer と同じ骨格 ----
-const HDR_H: i32 = 26;
-const STA_Y: i32 = 26;
-const STA_H: i32 = 24;
-const BODY_Y: i32 = STA_Y + STA_H;
-const TITLE_X: i32 = 8;
-const TITLE_Y: i32 = 5;
 // ヘッダ右は `120bpm 4/4`(本体と同じ並び: BPM が左、拍子が右)
 const HDR_BPM_X: i32 = 200;
 const HDR_MET_X: i32 = 268;
-const PLAY_X: i32 = 292; // ▶ / ■
-const PLAY_Y: i32 = STA_Y + 4;
-const PLAY_HIT_X: i32 = 240; // 当たり判定はステータス行の右 80px(D13)
-const HINT_X: i32 = 8; // 停止中だけ出す手引き(D8)
-const HINT_Y: i32 = STA_Y + 4;
+const PLAY_Y: i32 = STA_TEXT_Y; // ▶ / ■(当たり判定はステータス行の右 80px。D13)
+const HINT_Y: i32 = STA_TEXT_Y; // 停止中だけ出す手引き(D8)
 // ヘッダの `120bpm` のドラッグも BPM のシャトル(D3)
 const HDR_BPM_HIT_X0: i32 = HDR_BPM_X - 6;
 const HDR_BPM_HIT_X1: i32 = HDR_BPM_X + 58;
-const SYM_PLAY: &[u8] = b"\xEF\x81\x8B"; // U+F04B ▶
-const SYM_STOP: &[u8] = b"\xEF\x81\x8D"; // U+F04D ■
 
 // ---- 本体: 巨大な数字(7 セグメントを fill_rect で描く。Host API に大きな文字は無い。D2)----
 // BPM は左に 3 桁、拍子は右に分数(分子 / 線 / 分母、各 2 桁)。座標は docs/results/phase22b.md 0-1 の案 A

@@ -89,3 +89,105 @@ tap 258 38; expect tap a song
 - **D3: 案 A**(▶ / ‖ のトグル + 停止中は出さない ■)。
 - **D4: 案 B(27px × 7 行)**。一度に見える曲を多くする。回帰のシナリオの 2 曲目の行は y 52 + 27 + 13 = 92 前後(0-5 の `tap 120 108` を `tap 120 92` に読み替える)。
 - その他(D1・D2・D5〜D10)は 0-3 の推奨案のまま。D8 により metronome も `appui::theme` を使うように直し、`.wasm` を作り直す。
+
+## ステップ 1〜2: 骨格・配色・記号、一覧とスクロール(実装)
+
+### 変えたもの
+
+| ファイル | 変更 |
+|---|---|
+| `wasm-apps/appui/src/theme.rs`(新規) | **サンプルアプリが共有する骨格・配色・記号の定数**(D8)。ヘッダ / ステータス行の座標、メニューに合わせた配色、状態の色(ui-conventions §4)、▶ / ‖ / ■ のバイト列。定数だけで描画は持たない(Host API に依存しない)。追加だけなので app-sequencer の `appui-v0.1.0` には影響しない |
+| `wasm-apps/metronome/src/lib.rs` | 配色と骨格の定数を `appui::theme` から取るようにした。**`.wasm` はバイト単位で同一**(定数は畳み込まれる)ので、metronome の highmark・回帰は変わらない |
+| `wasm-apps/mp3player/src/lib.rs` / `Cargo.toml` | 作り直し(下記)。`appui` を使う(`Gesture` と `theme`)。`.wasm` 2,708 → 5,356 B |
+| `hosts/linux/hostapi_sdl.c` | `draw_symbol` に **U+F04C ‖**(縦棒 2 本)を足した(実機のフォントには元からある。F1)。Host API / ABI は不変 |
+| `scripts/linux-app-shots.sh`(新規)/ `scripts/metronome-shots.sh` | 22b の `metronome-shots.sh` を任意のアプリ向けにした(`.wasm` を引数で渡す)。`metronome-shots.sh` はこれを呼ぶだけにした(使い方は同じ) |
+| `scripts/device-regress.conf` | `SCENARIO[mp3player]` を新しい画面に、`EXPECT_DELTA[mp3player]` を −472 に(ステップ 3) |
+
+### mp3player の作り(仕様は `docs/apps/mp3player/spec.md`)
+
+- 骨格はヘッダ + ステータス行 + 黒の本体、題名 `MP3 Player`、ヘッダ右に選んでいる曲の番号(右端 x 312 にそろえる。幅が変わったら前の位置の文字を消す)。
+- ステータス行: 右端 ▶ / ‖、その左 ■(停止中は空の文字で消す)。停止中だけ手引き、失敗は赤で `cannot play: <曲名>`。
+- 一覧: 27px × 7 行(D4 = 案 B)、拡張子を取り、行に入らない名前は字幅の表(実機の Montserrat 14 の `adv_w` と Linux の DejaVu 13pt の大きいほう、ASCII 95 字)で切って `..`。
+- タッチは `EV_TOUCH_DOWN` で即反応していたのを、**appui の `Gesture` の `Tap`(離したとき)と `Scroll`(縦スワイプ)**にした。
+  スクロールは押したときの先頭を控え、累積の `dy` を行の高さで割って先頭を決める(行単位)。
+- 描き直しは、状態・選んでいる曲・先頭の行・失敗の印が変わったときだけ。
+- **失敗**は `hostapi_audio_play` の戻り値に加えて、状態が ERROR になった場合も拾う(次の曲へは進まない。今と同じ)。
+
+### Linux で確かめたこと(`scripts/linux-app-shots.sh`)
+
+| 画面 | 内容 |
+|---|---|
+| `captures/phase22c-step1/`(`sheet.png`) | 3 曲で停止中 → ▶ で再生(■ と ‖、行頭に若葉の ▶)→ ‖ で一時停止(■ と ▶、行頭に ‖)→ 2 曲目の行のタップで `2/3` → ■ で停止(手引きが戻り ■ が消える)。`texts` でも同じ |
+| `captures/phase22c-step2/`(`sheet.png`) | 曲を一時的に 13 曲に増やして(指示書 P5。確認後に消した)、上へ 60px のスワイプで 2 行、150px で末尾まで送って止まる、下へ 150px で 5 行戻る。位置の帯のつまみが動く。長い名前(`Night Drive (long version extended mix) remastered`)は `..` で切れる |
+| `captures/phase22c-step2b/`(`sheet.png`) | 画面の最下行の曲を再生 → 自然終了で次の曲へ進み、**一覧の外だったので 1 行送って追う**(`7/13` → `8/13`)→ 次の曲(壊れた MP3)で**赤の `cannot play: zz broken`**、▶ に戻る |
+| `captures/phase22c-step2c/` | 曲が無いとき: `0/0`、▶ は暗い灰(タップしても何もしない)、本体に `no mp3 files in /sdcard/music` |
+
+### 描画スロット
+
+矩形 = 背景 3 + 行 7 + 帯 1 + つまみ(先頭の位置ごと。16 曲で最大 10)= **最大 21 / 80**、
+文字 = 題名 1 + ヘッダの番号(幅で x が変わる。`1/3`・`10/16` などで最大 3 か所)+ 手引き 1 + ■ 1 + ▶ / ‖ 1 + 行頭の記号 7 + 曲名 7 + 曲が無いとき 1 = **最大 22 / 80**。
+Linux・実機とも `no free slot` の警告なし。
+
+## ステップ 3: 確認
+
+### 回帰のシナリオ(D10)
+
+```
+expect f3f1e4 1/; expect tap a song; expect 292 30 40e070 ▶;
+tap 300 38; expect 292 30 f3f1e4 ‖; expect 258 30 f06060 ■; wait 2;
+tap 300 38; expect 292 30 40e070 ▶; wait 1;
+tap 300 38; expect 292 30 f3f1e4 ‖;
+tap 120 92; expect f3f1e4 2/; wait 1;
+tap 258 38; expect tap a song
+```
+
+(conf では ▶ / ‖ / ■ を `\xef\x81\x8b` / `\xef\x81\x8c` / `\xef\x81\x8d` で書く。)
+**最初は番号を `1/3` / `2/3` で見ていたが、実機の SD には曲が 4 つあり(`1/4`)落ちた**。曲の総数は SD の中身で変わるので、
+番号の頭だけ(ヘッダのクリームの文字が `1/` で始まる = `f3f1e4 1/`)を見るようにした。
+
+### 実機の internal の差分 −472(U-23 の続き)
+
+新しいシナリオで mp3player の internal の差分が **−472 B**(基準 −36)になった。シナリオを分けて実機で 3 回ずつ回した(`captures/phase22c-iso-{a,b,c}`):
+
+| シナリオ | 1 回目 | 2 回目 | 3 回目 | 3 回の終了値 |
+|---|---|---|---|---|
+| a: 再生 → 停止 | −36 | +0 | +0 | 一致 |
+| b: a + 一時停止・再開 | −36 | +0 | +0 | 一致 |
+| c: a + **再生中に別の曲の行をタップ** | **−472** | +0 | +0 | 一致 |
+
+- **積み上がるリークではなく、起動後に初めて再生中の曲を切り替えたときの一度きりの確保**(−36 を含む)。一時停止・再開では減らない。
+- 3 曲とも 22,050Hz・モノラルで、形式の違いではない。ホストは再生中の play で今の曲を止めてから次を始める(`audio::Music_play_path`)。
+  **旧版のアプリでも再生中に行をタップすれば通っていた経路で、旧シナリオが通していなかっただけ**。何が確保しているかは U-23 と同じく未特定。
+- Phase 22 の扱い(一度きりの確保は conf に固定値で書き、反復しない)に合わせて **`EXPECT_DELTA[mp3player]=-472`** にした。roadmap の U-23 に追記。
+
+### 回帰の結果
+
+**Linux の回帰 3 本 PASS**(`captures/phase22c-linux2`):
+
+| アプリ | highmark | 前 | シナリオ |
+|---|---|---|---|
+| metronome | 33,576 | 33,576 | PASS(19 手順) |
+| mp3player | **27,208** | 19,112 | PASS(17 手順) |
+| hostapi_check | 34,728 | 34,728 | PASS(6 手順) |
+
+**mp3player の highmark の基準を 27,208 に取り直す**(appui の取り込みと一覧の描画で `.wasm` が 2.7 → 5.4KB)。metronome は `.wasm` が同一なので不変。
+
+**実機の回帰 3 本 PASS**(`KYBOTOS_DEV_APPS=ON` のファーム、`captures/phase22c-device-regress3/report.md`):
+
+| アプリ | 開始 free_int | int 差分 | largest_int | シナリオ |
+|---|---|---|---|---|
+| metronome ×3 | 150,264 | +0 / +0 / +0 | 98,304 | PASS(19 手順) |
+| mp3player | 150,264 | −472(上の一度きりの確保) | 98,304 | PASS(17 手順) |
+| hostapi_check | 149,792 | −176(U-30 の一度きり) | 98,304 | PASS(6 手順) |
+
+開始時の free_int 150,264・largest_int 98,304 は Phase 22b と同じ。許容外の WARN / ERROR 0 件。
+
+**app-sequencer**: 手元の appui を `--config` の patch で差し替えて `sequencer` のビルドが通った(Cargo.lock は戻した)。
+
+### 実機の画面(`captures/phase22c-device-cam/sheet.png`)
+
+シリアルから操作を注入してカメラで撮った(停止中 → 再生 → 一時停止 → 4 曲目の行 → 停止)。並び・記号・番号(`1/4` → `4/4`)・手引きの出し消しは Linux と同じ。
+カメラでは画面が白っぽく写り色味は判断できないので、**色と ‖ の字形、一時停止・再開の音(続きから鳴るか)はユーザーの確認待ち**。
+
+- 撮影の前に、**モニタのペインが回帰のモニタに繋がったまま**モニタの起動コマンドを送り、実機のシリアル入力に流れた(`KBCMD: err line too long`。無害)。
+  workflow §3.4 に書いてある落とし穴そのもので、ペインがプロンプトに戻ったのを見てから撮り直した。
