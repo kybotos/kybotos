@@ -6,6 +6,8 @@
 #     ボイスのコードを目印の行で抜き出し、x86 でビルドして同じ入力(5 つのシナリオ × 4 つのゲイン × 3 つのブロック長、
 #     各 2 秒)で鳴らす。ケースごとに両者のハッシュ(FNV-1a、出力の int32 の列)を出し、食い違いの数を数える。
 #     全ケースで一致すれば exit 0。
+#     **REV に shared/synth_voice.c があれば、それも同じ入力で鳴らす**(Phase 23 で切り出した共通の C)。
+#     目印が見つからない側(切り替えた後のホスト)は外す。並べた実装のハッシュがすべて同じなら一致とする。
 #
 # 用途: Phase 23 のステップ 0 で「2 本のボイスが同じ」こと(指示書の前提 P1)を数値で確かめ、
 #       切り出し前のハッシュを、共通の C(shared/synth_voice.c)の単体テストの期待値にするため。
@@ -22,7 +24,16 @@ trap 'rm -rf "$W"' EXIT
 git -C "$REPO" show "$REV:hosts/linux/hostapi_sdl.c" > "$W/hostapi_sdl.c"
 git -C "$REPO" show "$REV:src/components/audio/audio.cpp" > "$W/audio.cpp"
 git -C "$REPO" show "$REV:shared/hostapi_defs.h" > "$W/hostapi_defs.h"
+HAVE_S=0
+if git -C "$REPO" cat-file -e "$REV:shared/synth_voice.c" 2>/dev/null; then
+  git -C "$REPO" show "$REV:shared/synth_voice.c" > "$W/synth_voice.c"
+  git -C "$REPO" show "$REV:shared/synth_voice.h" > "$W/synth_voice.h"
+  HAVE_S=1
+fi
+HAVE_L=0; grep -q '^static void voice_render' "$W/hostapi_sdl.c" && HAVE_L=1
+HAVE_D=0; grep -q '^void voice_render' "$W/audio.cpp" && HAVE_D=1
 
+if [ "$HAVE_L" = 1 ]; then
 {
   cat <<'EOF'
 #include <stdint.h>
@@ -44,7 +55,9 @@ void L_drum(int n, int v, int master) { (void)master; voice_start_drum((uint8_t)
 void L_render(int32_t* acc, int n) { for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) if (s_voices[v].kind != VK_IDLE) voice_render(&s_voices[v], acc, n); }
 EOF
 } > "$W/linux_voice.c"
+fi
 
+if [ "$HAVE_D" = 1 ]; then
 {
   cat <<'EOF'
 #include <stdint.h>
@@ -68,6 +81,18 @@ void D_render(int32_t* acc, int n) { for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v
 }
 EOF
 } > "$W/device_voice.cpp"
+fi
+
+cat > "$W/shared_voice.c" <<'EOF'
+#include <stdint.h>
+#include "synth_voice.h"
+static int g_synth, g_click;
+void S_set(int master, int synth, int click) { (void)master; g_synth = synth; g_click = click; }
+void S_reset(void) { synthv_reset(); }
+void S_tone(int f, int d, int lv, int master) { synthv_start_tone((uint16_t)f, (uint16_t)d, (uint8_t)lv, master, g_click); }
+void S_drum(int n, int v, int master) { synthv_start_drum((uint8_t)n, (uint8_t)v, master, g_synth); }
+void S_render(int32_t* acc, int n) { (void)synthv_render(acc, n); }
+EOF
 
 cat > "$W/main.c" <<'EOF'
 #include <stdint.h>
@@ -78,10 +103,30 @@ typedef void (*reset_fn)(void);
 typedef void (*tone_fn)(int, int, int, int);
 typedef void (*drum_fn)(int, int, int);
 typedef void (*render_fn)(int32_t*, int);
-void L_set(int, int, int); void L_reset(void); void L_tone(int, int, int, int); void L_drum(int, int, int); void L_render(int32_t*, int);
-void D_set(int, int, int); void D_reset(void); void D_tone(int, int, int, int); void D_drum(int, int, int); void D_render(int32_t*, int);
-typedef struct { set_fn set; reset_fn reset; tone_fn tone; drum_fn drum; render_fn render; } Impl;
-static const Impl IMPL[2] = {{L_set, L_reset, L_tone, L_drum, L_render}, {D_set, D_reset, D_tone, D_drum, D_render}};
+typedef struct { const char* name; set_fn set; reset_fn reset; tone_fn tone; drum_fn drum; render_fn render; } Impl;
+#define DECL(P) void P##_set(int, int, int); void P##_reset(void); void P##_tone(int, int, int, int); \
+                void P##_drum(int, int, int); void P##_render(int32_t*, int);
+#if HAVE_L
+DECL(L)
+#endif
+#if HAVE_D
+DECL(D)
+#endif
+#if HAVE_S
+DECL(S)
+#endif
+static const Impl IMPL[] = {
+#if HAVE_L
+    {"linux", L_set, L_reset, L_tone, L_drum, L_render},
+#endif
+#if HAVE_D
+    {"device", D_set, D_reset, D_tone, D_drum, D_render},
+#endif
+#if HAVE_S
+    {"shared", S_set, S_reset, S_tone, S_drum, S_render},
+#endif
+};
+#define NIMPL ((int)(sizeof(IMPL) / sizeof(IMPL[0])))
 
 /* kind 0 = drum(note, velocity)、1 = tone(freq_hz, dur_ms, level)。at はフレーム */
 typedef struct { int at, kind, a, b, c; } Ev;
@@ -124,22 +169,33 @@ int main(void)
     for (int s = 0; s < 5; s++)
         for (int g = 0; g < 4; g++)
             for (int b = 0; b < 3; b++) {
-                const uint64_t hl = run(&IMPL[0], sc[s].ev, sc[s].n, gains[g], blocks[b], 44100 * 2);
-                const uint64_t hd = run(&IMPL[1], sc[s].ev, sc[s].n, gains[g], blocks[b], 44100 * 2);
+                uint64_t h[3];
+                int same = 1;
+                printf("%-18s master %3d synth %3d click %3d block %3d ",
+                       sc[s].name, gains[g][0], gains[g][1], gains[g][2], blocks[b]);
+                for (int k = 0; k < NIMPL; k++) {
+                    h[k] = run(&IMPL[k], sc[s].ev, sc[s].n, gains[g], blocks[b], 44100 * 2);
+                    if (h[k] != h[0]) same = 0;
+                    printf(" %s %016llx", IMPL[k].name, (unsigned long long)h[k]);
+                }
+                printf("%s\n", same ? "" : "  DIFF");
                 total++;
-                if (hl != hd) differ++;
-                printf("%-18s master %3d synth %3d click %3d block %3d  linux %016llx  device %016llx%s\n",
-                       sc[s].name, gains[g][0], gains[g][1], gains[g][2], blocks[b],
-                       (unsigned long long)hl, (unsigned long long)hd, hl == hd ? "" : "  DIFF");
+                if (!same) differ++;
             }
     printf("cases %d, differ %d\n", total, differ);
     return differ != 0;
 }
 EOF
 
-gcc -O2 -I"$W" -c "$W/linux_voice.c" -o "$W/l.o"
-g++ -O2 -std=gnu++17 -I"$W" -c "$W/device_voice.cpp" -o "$W/d.o"
-gcc -O2 -c "$W/main.c" -o "$W/m.o"
-g++ "$W/l.o" "$W/d.o" "$W/m.o" -lm -o "$W/compare"
-echo "rev: $(git -C "$REPO" rev-parse --short "$REV")"
+OBJS=()
+if [ "$HAVE_L" = 1 ]; then gcc -O2 -I"$W" -c "$W/linux_voice.c" -o "$W/l.o"; OBJS+=("$W/l.o"); fi
+if [ "$HAVE_D" = 1 ]; then g++ -O2 -std=gnu++17 -I"$W" -c "$W/device_voice.cpp" -o "$W/d.o"; OBJS+=("$W/d.o"); fi
+if [ "$HAVE_S" = 1 ]; then
+  gcc -O2 -I"$W" -c "$W/synth_voice.c" -o "$W/sv.o"
+  gcc -O2 -I"$W" -c "$W/shared_voice.c" -o "$W/s.o"
+  OBJS+=("$W/sv.o" "$W/s.o")
+fi
+gcc -O2 -DHAVE_L="$HAVE_L" -DHAVE_D="$HAVE_D" -DHAVE_S="$HAVE_S" -c "$W/main.c" -o "$W/m.o"
+g++ "${OBJS[@]}" "$W/m.o" -lm -o "$W/compare"
+echo "rev: $(git -C "$REPO" rev-parse --short "$REV")  linux=$HAVE_L device=$HAVE_D shared=$HAVE_S"
 "$W/compare"

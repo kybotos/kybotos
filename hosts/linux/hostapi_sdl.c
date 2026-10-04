@@ -31,6 +31,7 @@
 #include "hostapi_defs.h"
 #include "master_ui.h"   /* Phase 21b: マスター設定(両ホスト共有)*/
 #include "boot_sound.h"  /* Phase 22a 追記: 起動音(両ホスト共有)*/
+#include "synth_voice.h" /* Phase 23: 内蔵音源のボイス(両ホスト共有)*/
 #include "hostapi_midi.h"
 #include "hostapi_seq.h"
 
@@ -82,39 +83,9 @@ static const ToneDef kDefaultClick = {true, 1000, 30, 100};
 
 /* ---- ポリフォニックミキサ (Phase 21) ----
  * 単声だった Voice を HOSTAPI_SYNTH_VOICES 本にし、CLICK のトーンと内蔵音源
- * (SYNTH ポート)の両方をここに載せる。合成はキャッシュレス(サインは再帰振動子、
- * ノイズは xorshift32)で、サンプルごとに libm を呼ばない。
- * 実機側(src/components/audio)も同じ構造にしてあり、音色の式は両ホストで同一。 */
-
-/* ボイスの種類。SAMPLE への差し替えは voice_render の中身だけで済む(0-d) */
-typedef enum {
-    VK_IDLE = 0,
-    VK_TONE,   /* CLICK ポート / tone_play: 減衰サイン */
-    VK_KICK,   /* ピッチ掃引する減衰サイン */
-    VK_SNARE,  /* ノイズ + 減衰サイン */
-    VK_HAT,    /* ハイパスしたノイズ(短い) */
-    VK_CRASH,  /* ハイパスしたノイズ(長い) */
-    VK_WOOD,   /* 減衰サイン + すぐ消えるノイズ(メトロノーム。Phase 21c) */
-} VoiceKind;
-
-typedef struct {
-    VoiceKind kind;
-    uint8_t note;        /* SYNTH のとき。ボイス奪取の判定に使う */
-    uint32_t seq;        /* 発音順。最も古いものを奪うため */
-    int remaining;       /* 残りフレーム(0 = idle) */
-    /* サイン(再帰振動子) */
-    float s, c, cw, sw;
-    float decay, amp;
-    /* ピッチ掃引(Kick): ブロックごとに係数を作り直す */
-    float f_cur, f_end, f_k;
-    /* ノイズ */
-    uint32_t rng;
-    float n_prev;        /* 1 次ハイパス(差分)用 */
-    float n_amp, n_decay;
-} Voice;
-
-static Voice s_voices[HOSTAPI_SYNTH_VOICES];
-static uint32_t s_voice_seq;
+ * (SYNTH ポート)の両方をここに載せる。**ボイス(合成の式と定数)は shared/synth_voice.c**
+ * (Phase 23。それまでは実機の audio.cpp と同じコードをここにも持っていた)。
+ * ここに残るのはミキサ(発音要求の受け渡し、240 フレームのブロック、起動音、クリップ)。 */
 
 static uint64_t s_audio_samples;   /* 再生済みフレーム数(音声クロック) */
 /* マスター音量の既定値(Phase 21b)。**実機の Mp3Player::kDefaultVolume と同じ値にすること**。
@@ -137,168 +108,6 @@ static int s_req_n;
 static void req_push(const Req* r)
 {
     if (s_req_n < REQ_MAX) s_reqs[s_req_n++] = *r;
-}
-
-static void voice_set_sine(Voice* v, float freq, int frames, float amp)
-{
-    const float w = 2.0f * (float)M_PI * freq / CLICK_RATE;
-    v->s = 0.0f;
-    v->c = 1.0f;
-    v->cw = cosf(w);
-    v->sw = sinf(w);
-    v->amp = amp;
-    v->decay = expf(-3.5f / (float)(frames > 0 ? frames : 1));
-    v->remaining = frames;
-}
-
-/* 空きボイスを取る。無ければ「同じ note の最も古いもの」→「全体で最も古いもの」を奪う */
-static Voice* voice_alloc(uint8_t note)
-{
-    Voice* best = NULL;
-    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
-        if (s_voices[i].kind == VK_IDLE || s_voices[i].remaining <= 0) return &s_voices[i];
-    }
-    for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
-        if (s_voices[i].note == note && (!best || s_voices[i].seq < best->seq)) best = &s_voices[i];
-    }
-    if (!best) {
-        for (int i = 0; i < HOSTAPI_SYNTH_VOICES; i++) {
-            if (!best || s_voices[i].seq < best->seq) best = &s_voices[i];
-        }
-    }
-    return best;
-}
-
-/* CLICK ポート / tone_play。マスター音量は発音時に焼き込む(従来と同じ) */
-static void voice_start_tone(const ToneDef* t)
-{
-    Voice* v = voice_alloc(0);
-    if (!v) return;
-    memset(v, 0, sizeof(*v));
-    v->kind = VK_TONE;
-    v->seq = ++s_voice_seq;
-    voice_set_sine(v, (float)t->freq_hz, CLICK_RATE * t->dur_ms / 1000,
-                   12000.0f * t->level / 100.0f * s_master_vol / 100.0f
-                       * s_gain_click / 100.0f);
-}
-
-/* SYNTH ポート。4 音とも「0-d の式」で作る。未知の note は何もしない。
- * 基準レベルは **4 音同時 + クリックでクリップしない**ように決めた(0-f)。
- * 実測(Linux の WAV): 4 音同時のピークは 8000 系で 24,781(-2.4dBFS)、
- * クリック(12,000)が重なると振り切れるので **0.7 倍**にしてある。 */
-static void voice_start_drum(uint8_t note, uint8_t velocity)
-{
-    const float g = (float)velocity / 127.0f * (float)s_master_vol / 100.0f
-                    * (float)s_gain_synth / 100.0f;
-    Voice* v = voice_alloc(note);
-    if (!v) return;
-    memset(v, 0, sizeof(*v));
-    v->seq = ++s_voice_seq;
-    v->note = note;
-    v->rng = 0x9E3779B9u ^ (uint32_t)note ^ (s_voice_seq << 8);
-    switch (note) {
-    case HOSTAPI_SYNTH_NOTE_KICK:
-        v->kind = VK_KICK;
-        voice_set_sine(v, 110.0f, CLICK_RATE * 180 / 1000, 7000.0f * g);
-        v->f_cur = 110.0f;
-        v->f_end = 45.0f;
-        v->f_k = expf(-1.0f / ((float)CLICK_RATE * 0.040f)); /* 掃引 40ms */
-        break;
-    case HOSTAPI_SYNTH_NOTE_SNARE:
-        v->kind = VK_SNARE;
-        voice_set_sine(v, 190.0f, CLICK_RATE * 140 / 1000, 2800.0f * g);
-        v->n_amp = 5600.0f * g;
-        v->n_decay = expf(-4.5f / (float)(CLICK_RATE * 140 / 1000));
-        break;
-    case HOSTAPI_SYNTH_NOTE_CHH:
-        v->kind = VK_HAT;
-        v->remaining = CLICK_RATE * 45 / 1000;
-        v->n_amp = 5600.0f * g;
-        v->n_decay = expf(-5.0f / (float)v->remaining);
-        break;
-    case HOSTAPI_SYNTH_NOTE_CRASH:
-        v->kind = VK_CRASH;
-        v->remaining = CLICK_RATE * 800 / 1000;
-        v->n_amp = 5600.0f * g;
-        v->n_decay = expf(-4.0f / (float)v->remaining);
-        break;
-    case HOSTAPI_SYNTH_NOTE_METRO_CLICK:
-    case HOSTAPI_SYNTH_NOTE_METRO_BELL: {
-        /* メトロノーム(Phase 21c)。ウッドブロック系の短い共鳴音: 減衰サイン + 4ms で消えるノイズ
-         * (叩いた瞬間のアタック)。**Bell は Click より高く長く鳴る**(明るく目立つ)。
-         * 中〜高域に置くのは内蔵スピーカーが低域を出さないため(所感 D-1)。
-         * **式と定数は実機の audio.cpp と同じにすること** */
-        const bool bell = (note == HOSTAPI_SYNTH_NOTE_METRO_BELL);
-        v->kind = VK_WOOD;
-        voice_set_sine(v, bell ? 2000.0f : 1200.0f, CLICK_RATE * (bell ? 150 : 60) / 1000, 8000.0f * g);
-        v->n_amp = 3000.0f * g;
-        v->n_decay = expf(-5.0f / ((float)CLICK_RATE * 0.004f));
-        break;
-    }
-    default:
-        v->kind = VK_IDLE; /* 未知の note は何もしない(ログも出さない) */
-        v->remaining = 0;
-        break;
-    }
-}
-
-static inline float voice_noise(Voice* v)
-{
-    /* xorshift32。サンプルごとに libm を呼ばない */
-    v->rng ^= v->rng << 13;
-    v->rng ^= v->rng >> 17;
-    v->rng ^= v->rng << 5;
-    return (float)((int32_t)v->rng) * (1.0f / 2147483648.0f);
-}
-
-/* n フレームを acc にミックスする。**サンプル再生に差し替えるときはこの関数だけ** */
-static void voice_render(Voice* v, int32_t* acc, int n)
-{
-    if (v->remaining <= 0) { v->kind = VK_IDLE; return; }
-    if (n > v->remaining) n = v->remaining;
-
-    if (v->kind == VK_KICK) {
-        /* ピッチ掃引はブロック単位で係数を作り直す(サンプルごとに cosf を呼ばない) */
-        v->f_cur = v->f_end + (v->f_cur - v->f_end) * powf(v->f_k, (float)n);
-        const float w = 2.0f * (float)M_PI * v->f_cur / CLICK_RATE;
-        v->cw = cosf(w);
-        v->sw = sinf(w);
-    }
-
-    for (int i = 0; i < n; i++) {
-        float out = 0.0f;
-        switch (v->kind) {
-        case VK_TONE:
-        case VK_KICK:
-        case VK_SNARE:
-        case VK_WOOD: {
-            const float s2 = v->s * v->cw + v->c * v->sw;
-            v->c = v->c * v->cw - v->s * v->sw;
-            v->s = s2;
-            v->amp *= v->decay;
-            out = v->amp * v->s;
-            if (v->kind == VK_SNARE || v->kind == VK_WOOD) {
-                v->n_amp *= v->n_decay;
-                out += v->n_amp * voice_noise(v);
-            }
-            break;
-        }
-        case VK_HAT:
-        case VK_CRASH: {
-            const float x = voice_noise(v);
-            const float hp = x - v->n_prev; /* 1 次ハイパス(差分) */
-            v->n_prev = x;
-            v->n_amp *= v->n_decay;
-            out = v->n_amp * hp;
-            break;
-        }
-        default:
-            break;
-        }
-        acc[i] += (int32_t)out;
-    }
-    v->remaining -= n;
-    if (v->remaining <= 0) v->kind = VK_IDLE;
 }
 
 /* ジッタ統計: 発音開始位置(音声クロック)と壁時計を N 発ごとに集計 */
@@ -412,17 +221,19 @@ static void audio_callback(void* userdata, Uint8* stream, int len)
         /* ブロックの先頭で、溜まっている発音要求をすべて開始する */
         if (s_req_n > 0) {
             for (int i = 0; i < s_req_n; i++) {
-                if (s_reqs[i].is_synth) voice_start_drum(s_reqs[i].note, s_reqs[i].velocity);
-                else                    voice_start_tone(&s_reqs[i].tone);
+                if (s_reqs[i].is_synth) {
+                    synthv_start_drum(s_reqs[i].note, s_reqs[i].velocity, s_master_vol, s_gain_synth);
+                } else {
+                    const ToneDef* t = &s_reqs[i].tone;
+                    synthv_start_tone(t->freq_hz, t->dur_ms, t->level, s_master_vol, s_gain_click);
+                }
             }
             s_req_n = 0;
             click_record_fire(s_audio_samples + (uint64_t)off);
         }
 
         memset(acc, 0, sizeof(int32_t) * (size_t)n);
-        for (int v = 0; v < HOSTAPI_SYNTH_VOICES; v++) {
-            if (s_voices[v].kind != VK_IDLE) voice_render(&s_voices[v], acc, n);
-        }
+        (void)synthv_render(acc, n);
         if (s_boot_pos < BOOT_SOUND_FRAMES) {
             const int m = (BOOT_SOUND_FRAMES - s_boot_pos < n) ? BOOT_SOUND_FRAMES - s_boot_pos : n;
             for (int i = 0; i < m; i++) acc[i] += boot_sound_pcm[s_boot_pos + i] * s_boot_gain / 100;
@@ -528,8 +339,7 @@ void host_sdl_audio_reset(void)
     if (s_audio) {
         SDL_LockAudioDevice(s_audio);
         s_req_n = 0;
-        memset(s_voices, 0, sizeof(s_voices));   /* 鳴っているボイスを消す */
-        s_voice_seq = 0;
+        synthv_reset();                          /* 鳴っているボイスを消す */
         s_fire_count = 0;
         for (int i = 0; i < HOSTAPI_TONE_SLOTS; i++) s_tones[i] = (ToneDef){0};
         s_tones[0] = kDefaultClick; /* slot 0 = v0 互換の既定クリック */

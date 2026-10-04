@@ -117,3 +117,53 @@ bool synthv_render(int32_t* acc, int n);
 1. API の形(a)と、**ゲインを整数 2 つで渡していまの式の順を保つ**こと(b)。
 2. **実機も切り替える**(c)。
 3. **ゲート 3 / 完了条件 2 を e のとおり言い換える**(指示書に追記を足す)。
+
+## ステップ 1: 基準(2026-10-04)
+
+ステップ 0 で済ませた(指示書の追記のとおり)。
+
+- オフラインの期待値: `captures/phase23/voice-compare-head.txt`(`2bf5156`、60 ケース。Linux と実機のコードで同じ)。
+- 実機に近い経路の基準: `synth_probe` を Linux で 2 回、10 秒ずつ録った WAV(`captures/phase23/probe-head-{1,2}.wav`)。
+
+## ステップ 2: `shared/synth_voice.{h,c}` と Linux の切り替え(2026-10-04)
+
+**変更**
+
+- `shared/synth_voice.h` / `synth_voice.c` を新しく作った。API はステップ 0 の a のとおり。
+  式と定数は `hostapi_sdl.c` から**そのまま**移した。サンプルレートの名前だけ `CLICK_RATE` → `SYNTHV_RATE`(値は 44100 のまま)。
+  `M_PI` が無い環境のために、同じ値の定義を足した。
+- `hosts/linux/hostapi_sdl.c`: `VoiceKind` / `Voice` / `s_voices` / `s_voice_seq` と `voice_*` の 6 関数を削除した(−203 行)。
+  ミキサからは `synthv_start_drum(note, vel, s_master_vol, s_gain_synth)` / `synthv_start_tone(..., s_master_vol, s_gain_click)` / `synthv_render` / `synthv_reset` を呼ぶ。
+- `hosts/linux/CMakeLists.txt`: `kybotos_host` に `shared/synth_voice.c` を足した。単体テスト `synth_voice_test` を ctest に登録した。
+- `hosts/linux/tests/synth_voice_test.c`(ステップ 0 の d):
+  1. 60 ケースのハッシュが切り出す前と一致すること(期待値はテストの中の表)。
+  2. 奪取の規則。ノイズの種は発音の通し番号から作るので、**未知の note で通し番号だけ進め**、奪取を起こさずに同じ番号のボイスを組み立てて、出力のハッシュを比べる。
+     (a) 同じ note が無ければ、全体で最も古いものを奪う。(b) 同じ note があれば、その最も古いものを奪う。比較が意味を持つこと(番号がずれれば出力が変わる)も確かめる。
+  3. 未知の note は鳴らない。リセットの後は鳴らない。tone は `dur_ms` で鳴り終わる。
+- `scripts/synth-voice-compare.sh`: 版に `shared/synth_voice.c` があれば、それも同じ入力で鳴らす。目印が見つからない側(切り替えた後のホスト)は外す。
+- `scripts/wav_summary.py`(新規): WAV の最初のオンセットから 8 秒について、ピーク、rms、オンセットの数、帯域エネルギー(goertzel 6 点)を 1 行に出す。
+
+**確認**
+
+| 項目 | 結果 |
+|---|---|
+| Linux のビルド | 警告は WAMR の既存のもの(`invokeNative_em64.s.o: missing .note.GNU-stack`)だけ |
+| ctest | **3/3 PASS**(seq_core_test / master_ui_test / **synth_voice_test**) |
+| テストの感度 | scratch で `synth_voice.c` の写しの Synth のゲインを `velocity/127 × (master/100 × gain/100)` に変える(**掛ける順だけ**)と、**7 件が FAIL**(64 打 × マスター 37 / Synth 55 / Click 80 などのケース)。ステップ 0 の b(ゲインを整数 2 つで渡し、順を保つ)が必要だったことの裏づけ |
+| 比較スクリプト(古い版) | `synth-voice-compare.sh 2bf5156`: 60 ケース一致、ハッシュは `voice-compare-head.txt` と同じ(書き換えの後も同じ結果を出す) |
+| Linux の回帰 3 本 | **PASS**(metronome highmark 33,576 / mp3player 27,208 / hostapi_check 34,728。いずれも Phase 22〜22e と同じ) |
+| `synth_probe` の WAV(前後 2 回ずつ) | 下の表。**ピーク・rms・オンセットの数が 4 本とも同じ**。帯域エネルギーの違いは、切り出し前の 2 回どうしの違い(最大 7.7dB。ブロックの位相で goertzel の値が動く)の範囲に入っている |
+
+```
+wav                 first    sec   peak      rms onsets     60Hz    110Hz    190Hz   1200Hz   2000Hz   6000Hz
+probe-head-1.wav     1280   8.00  16708    427.5     22    64.17    66.12    73.22    42.42    39.82    47.12
+probe-head-2.wav     1024   8.00  16708    427.5     22    68.70    58.44    74.38    42.39    44.75    48.28
+probe-new-1.wav       768   8.00  16708    427.5     22    65.54    67.00    75.01    42.03    40.56    45.20
+probe-new-2.wav      1024   8.00  16708    427.5     22    68.70    58.42    74.38    42.41    45.56    47.74
+```
+
+(`python3 scripts/wav_summary.py captures/phase23/probe-*.wav`。`first` は最初の音までのサンプル数で、録るたびに変わる。
+最初の音の位置が同じ 1024 になった head-2 と new-2 は、帯域エネルギーもほぼ同じ。)
+
+**途中のつまずき**: 比較スクリプトを書き換える Python をシェルのヒアドキュメントで渡したら、Python の中に `EOF` だけの行があってそこで切れ、
+残りの行をシェルが実行した(`/main.c: Permission denied` で止まった)。作業ツリーに変化が無いことを `git status` で確かめ、Python をファイルにして実行し直した。

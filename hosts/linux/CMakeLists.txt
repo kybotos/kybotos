@@ -73,7 +73,8 @@ add_executable(kybotos_host main.c cmd_fifo.c hostapi_sdl.c hostapi_midi.c hosta
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/seq_core.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/splash_logo.c
-               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/boot_sound.c)
+               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/boot_sound.c
+               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/synth_voice.c)
 target_include_directories(kybotos_host PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
@@ -95,6 +96,14 @@ add_executable(master_ui_test tests/master_ui_test.c
                ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c)
 target_include_directories(master_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared)
 add_test(NAME master_ui_test COMMAND master_ui_test)
+
+# ---- shared/synth_voice.c の単体テスト(Phase 23)----
+# 切り出す前のコードと出力のハッシュが一致すること、ボイスの奪取の規則、未知の note とリセット。
+add_executable(synth_voice_test tests/synth_voice_test.c
+               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/synth_voice.c)
+target_include_directories(synth_voice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared)
+target_link_libraries(synth_voice_test PRIVATE m)
+add_test(NAME synth_voice_test COMMAND synth_voice_test)
 
 if(ALSA_FOUND)
     target_compile_definitions(kybotos_host PRIVATE HAVE_ALSA)
