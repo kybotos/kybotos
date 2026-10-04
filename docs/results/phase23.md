@@ -206,6 +206,17 @@ probe-new-2.wav      1024   8.00  16708    427.5     22    68.70    58.42    74.
 結果は **−36 / +0 / +0**(`captures/phase23-probe-heap/monitor.log`)で、U-23 の「起動後に初めて MP3 を鳴らしたときの一度きりの確保」と同じ。
 −256 B のときは **MP3 が鳴っている最中(小節 12 の直前)にアプリを止めた**ので、別の一度きりの経路を通ったとみている(U-23 と同じ種類。切り分けはしていない)。
 
+**非公開の app-sequencer の回帰(sequencer を足した 4 本)**: ステップ 3 のコミットの後に回した(本来はコミットの前に回す順序だった)。
+
+| 項目 | 結果 |
+|---|---|
+| Linux(`app-sequencer/scripts/regress-linux.sh`) | **4 本 PASS**。sequencer の highmark 221,440(repo の分割のときと同じ)、他の 3 本は上と同じ |
+| 実機(sequencer 入りのファーム、`KYBOTOS_DEV_APPS=1`) | **4 本 PASS**(`captures/phase23-seq-device2/report.md`)。開始時の free_int 150,232、sequencer の反復 3 回 +0、WARN / ERROR 0 件 |
+
+- 1 回目は「hostapi_check が SD に無い」で止まった。**`build-fw.sh flash` に `KYBOTOS_DEV_APPS=1` を付け忘れた**ため。`flash` も `idf.py` でビルドし直すので、
+  付けないと OFF の構成で作り直して焼く(スクリプトの冒頭のコメントどおり、build と flash の両方に付ける)。付けて焼き直したら通った。
+- 終わったあと、実機は公開の普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、検査用アプリを消した。
+
 ## ステップ 4: 文書(2026-10-04)
 
 - `docs/architecture.md` §11-12 に、ボイスの置き場所(`shared/synth_voice.c`)と、ミキサに残るものを書いた。
