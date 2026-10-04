@@ -905,3 +905,11 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - 確認: 実機・Linux の回帰 3 本 PASS。metronome の highmark の基準は 33,576(appui などで `.wasm` 3.7 → 7.3KB)、
     mp3player / hostapi_check は不変。開始時の `free_int` 150,264 / `largest_int` 98,304(Phase 22a と同じ)。
   - 実機は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームで残してある。
+
+- **Phase 22c(mp3player を磨く)完了。** 詳細は `docs/results/phase22c.md`、仕様は `docs/apps/mp3player/spec.md`(新設)。
+  - 画面: metronome と同じ骨格(ヘッダ `MP3 Player` + 右に曲の番号、ステータス行、黒の本体)。`(wasm)` と `state:` の行を消した。
+  - 操作: ステータス行の右端が **▶ / ‖(再生 / 一時停止)**、その左に **■**(停止中は出さない)。一覧は 27px × 7 行で、**縦スワイプで行単位に送る**
+    (`^` / `v` のボタンを消した)。行のタップ(離したとき)でその曲を頭から。
+  - 骨格・配色・記号の定数を `appui::theme` にまとめ、metronome も使う(metronome の `.wasm` は同一)。Linux ホストに ‖ の図形を足した。Host API / ABI は不変。
+  - 確認: 実機・Linux の回帰 3 本 PASS。mp3player の highmark の基準は 27,208、`EXPECT_DELTA[mp3player]` は −472(再生中の曲の切り替えの一度きりの確保。U-23)。
+  - 実機は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームで残してある。
