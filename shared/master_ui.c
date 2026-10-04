@@ -17,11 +17,16 @@ static const bool k_default_mute[MASTERUI_ITEMS] = { false, false, false, MASTER
 static bool s_holding;
 static int s_hold_x, s_hold_y;
 
-/* `-` / `+` の長押し連打 */
-static int s_held_item = -1;      /* 押している行 */
-static int s_held_delta;          /* 0 = 押していない */
-static uint32_t s_held_since;
+/* 開いている間の押下(Phase 22e)。押した場所で的が決まり、離すまで変わらない */
+typedef enum { TGT_NONE = 0, TGT_NUM, TGT_BAR, TGT_HANDLE } target_t;
+static target_t s_target;
+static int s_item = -1;           /* 的の行(数字・バー) */
+static int s_press_y;             /* 押した y(はじき・押したまま・取っ手) */
+static int s_cur_y;               /* 最新の y */
+static bool s_rep_on;             /* 押したままの連続変更の最中 */
+static int s_repeats;             /* この押下で連続変更した回数(> 0 なら離したときの ±1 は無し) */
 static uint32_t s_next_repeat_at;
+static int s_blink_phase = -1;    /* 最後に知らせた点滅の相 */
 
 static uint32_t now_ms(void) { return (s_hooks && s_hooks->now_ms) ? s_hooks->now_ms() : 0; }
 
@@ -51,8 +56,8 @@ void masterui_init(const masterui_hooks_t *hooks)
     s_hooks = hooks;
     s_open = false;
     s_holding = false;
-    s_held_item = -1;
-    s_held_delta = 0;
+    s_target = TGT_NONE;
+    s_item = -1;
     for (i = 0; i < MASTERUI_ITEMS; i++) {
         s_muted[i] = k_default_mute[i];
         apply_level((masterui_item_t)i, k_defaults[i]);
@@ -93,24 +98,49 @@ void masterui_held_down(int *x, int *y)
     if (y) *y = s_hold_y;
 }
 
+static void end_press(void)
+{
+    s_target = TGT_NONE;
+    s_item = -1;
+    s_rep_on = false;
+    s_repeats = 0;
+}
+
 void masterui_open(void)
 {
     s_open = true;
-    s_held_delta = 0;
-    s_held_item = -1;
+    end_press();
 }
 
 void masterui_close(void)
 {
     s_open = false;
-    s_held_delta = 0;
-    s_held_item = -1;
+    end_press();
+}
+
+/* バーの x → 値(左端 = 0、右端 = 100。四捨五入) */
+static int bar_value(int x)
+{
+    int v = ((x - MASTERUI_BAR_X) * 100 + MASTERUI_BAR_W / 2) / MASTERUI_BAR_W;
+    return v < 0 ? 0 : (v > 100 ? 100 : v);
+}
+
+/* 押した位置の行(行の間の隙間は下の行に含める)。無ければ -1 */
+static int row_at(int y)
+{
+    int i;
+    for (i = 0; i < MASTERUI_ITEMS; i++) {
+        const int ry = MASTERUI_ROW_Y(i);
+        if (y >= ry - (MASTERUI_ROW_PITCH - MASTERUI_ROW_H) && y < ry + MASTERUI_ROW_H) return i;
+    }
+    return -1;
 }
 
 /* 開いている間の当たり判定。押した場所で意味が決まる */
 static masterui_action_t on_touch_open(uint16_t type, int x, int y)
 {
     if (type == HOSTAPI_EV_TOUCH_DOWN) {
+        end_press();
         if (y >= MASTERUI_BAND_H) {
             masterui_close(); /* 帯の外 = 閉じる(iOS の引き下ろしと同じ感覚) */
             return MASTERUI_CONSUME;
@@ -119,37 +149,68 @@ static masterui_action_t on_touch_open(uint16_t type, int x, int y)
             masterui_close();
             return MASTERUI_CONSUME;
         }
+        if (in_rect(x, y, MASTERUI_HANDLE_HIT_X, MASTERUI_HANDLE_HIT_Y, MASTERUI_HANDLE_HIT_W,
+                    MASTERUI_BAND_H - MASTERUI_HANDLE_HIT_Y)) {
+            s_target = TGT_HANDLE; /* 取っ手: 上へ払うと閉じる */
+            s_press_y = s_cur_y = y;
+            return MASTERUI_CONSUME;
+        }
         {
-            int i;
-            for (i = 0; i < MASTERUI_ITEMS; i++) {
-                const int ry = MASTERUI_ROW_Y(i);
-                int delta = 0;
-                if (in_rect(x, y, MASTERUI_MUTE_X, ry, MASTERUI_MUTE_W, MASTERUI_ROW_H)) {
-                    /* ラベル = MUTE のトグル(Phase 21c)。戻せる操作なので 1 タップ、DOWN で即 */
-                    s_muted[i] = !s_muted[i];
-                    push_level((masterui_item_t)i);
-                    break;
-                }
-                if (in_rect(x, y, MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H)) delta = -1;
-                else if (in_rect(x, y, MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H)) delta = 1;
-                if (delta != 0) {
-                    apply_level((masterui_item_t)i, s_level[i] + delta); /* 押下直後に 1 ステップ */
-                    s_held_item = i;
-                    s_held_delta = delta;
-                    s_held_since = now_ms();
-                    s_next_repeat_at = s_held_since + MASTERUI_HOLD_DELAY_MS;
-                    break;
-                }
+            const int i = row_at(y);
+            if (i < 0) return MASTERUI_CONSUME;
+            if (x >= MASTERUI_MUTE_X && x < MASTERUI_MUTE_X + MASTERUI_MUTE_W) {
+                /* ラベル = MUTE のトグル(Phase 21c)。戻せる操作なので 1 タップ、DOWN で即 */
+                s_muted[i] = !s_muted[i];
+                push_level((masterui_item_t)i);
+            } else if (x >= MASTERUI_BAR_HIT_X && x < MASTERUI_BAR_HIT_X + MASTERUI_BAR_HIT_W) {
+                /* バー: 押した位置の値にする(タップ)。動かすと追従する(スクラブ) */
+                s_target = TGT_BAR;
+                s_item = i;
+                apply_level((masterui_item_t)i, bar_value(x));
+            } else if (x >= MASTERUI_NUM_HIT_X) {
+                /* 数字: はじき(UP で ±1)/ 押したまま(tick で ±5 → ±10) */
+                s_target = TGT_NUM;
+                s_item = i;
+                s_press_y = s_cur_y = y;
             }
         }
         return MASTERUI_CONSUME;
     }
+    if (type == HOSTAPI_EV_TOUCH_MOVE) {
+        s_cur_y = y;
+        if (s_target == TGT_BAR) {
+            apply_level((masterui_item_t)s_item, bar_value(x));
+        } else if (s_target == TGT_HANDLE && s_press_y - y >= MASTERUI_HOLD_PX) {
+            masterui_close();
+        }
+        return MASTERUI_CONSUME; /* MOVE も食う(下のアプリへは渡さない) */
+    }
     if (type == HOSTAPI_EV_TOUCH_UP) {
-        s_held_delta = 0;
-        s_held_item = -1;
+        /* 離した位置は UP に入る(MOVE は間引かれるので、最後の数 px は UP にしか無いことがある。ui-conventions §6) */
+        if (s_target == TGT_BAR) {
+            apply_level((masterui_item_t)s_item, bar_value(x));
+        } else if (s_target == TGT_NUM && s_repeats == 0) {
+            const int dy = y - s_press_y;
+            if (dy <= -MASTERUI_FLICK_MIN_PX) apply_level((masterui_item_t)s_item, s_level[s_item] + 1);
+            else if (dy >= MASTERUI_FLICK_MIN_PX) apply_level((masterui_item_t)s_item, s_level[s_item] - 1);
+        } else if (s_target == TGT_HANDLE && s_press_y - y >= MASTERUI_HANDLE_CLOSE_PX) {
+            masterui_close();
+            return MASTERUI_CONSUME;
+        }
+        end_press();
         return MASTERUI_CONSUME;
     }
-    return MASTERUI_CONSUME; /* MOVE も食う(下のアプリへは渡さない) */
+    return MASTERUI_CONSUME;
+}
+
+int masterui_editing(void)
+{
+    return (s_open && (s_target == TGT_NUM || s_target == TGT_BAR)) ? s_item : -1;
+}
+
+bool masterui_blink_on(void)
+{
+    return ((now_ms() / MASTERUI_BLINK_MS) & 1u) == 0;
 }
 
 masterui_action_t masterui_on_touch(uint16_t type, int x, int y)
@@ -196,15 +257,39 @@ masterui_action_t masterui_on_touch(uint16_t type, int x, int y)
 
 bool masterui_tick(void)
 {
-    if (!s_open || s_held_delta == 0 || s_held_item < 0) return false;
-    const uint32_t now = now_ms();
-    if ((int32_t)(now - s_next_repeat_at) < 0) return false;
-    const uint32_t held = now - s_held_since;
-    uint32_t interval = MASTERUI_HOLD_INT1_MS;
-    if (held >= MASTERUI_HOLD_ACCEL2_MS) interval = MASTERUI_HOLD_INT3_MS;
-    else if (held >= MASTERUI_HOLD_ACCEL1_MS) interval = MASTERUI_HOLD_INT2_MS;
-    const int before = s_level[s_held_item];
-    apply_level((masterui_item_t)s_held_item, before + s_held_delta);
-    s_next_repeat_at = now + interval;
-    return s_level[s_held_item] != before;
+    bool changed = false;
+    if (!s_open) return false;
+    if (s_target == TGT_NUM) {
+        /* 押したままの連続変更(metronome の hold_repeat と同じ規則) */
+        const int dy = s_cur_y - s_press_y;
+        const int ady = dy < 0 ? -dy : dy;
+        const uint32_t now = now_ms();
+        if (ady < MASTERUI_HOLD_PX) {
+            s_rep_on = false; /* 戻したら止まる(もう一度動かせば最初の ±5 から) */
+        } else {
+            if (!s_rep_on) {
+                s_rep_on = true;
+                s_next_repeat_at = now + MASTERUI_HOLD_START_MS;
+            }
+            if ((int32_t)(now - s_next_repeat_at) >= 0) {
+                const int k = s_repeats < MASTERUI_REPEAT_TO_10 ? 5 : 10;
+                const int before = s_level[s_item];
+                s_repeats++;
+                s_next_repeat_at = now + MASTERUI_REPEAT_MS;
+                apply_level((masterui_item_t)s_item, before + (dy < 0 ? k : -k));
+                changed = s_level[s_item] != before;
+            }
+        }
+    }
+    if (masterui_editing() >= 0) {
+        const int phase = masterui_blink_on() ? 1 : 0;
+        if (phase != s_blink_phase) {
+            s_blink_phase = phase;
+            changed = true;
+        }
+    } else if (s_blink_phase != -1) {
+        s_blink_phase = -1; /* 点滅をやめた(通常色に戻す) */
+        changed = true;
+    }
+    return changed;
 }

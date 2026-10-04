@@ -1245,42 +1245,66 @@ void host_sdl_window_to_logical(int wx, int wy, int* lx, int* ly)
     *ly = wy;
 }
 
-/* マスター設定のオーバーレイ(Phase 21b)。
+/* 文字の幅(論理 px)。右寄せに使う */
+static int text_width(const char* s)
+{
+#ifdef HAVE_SDL_TTF
+    int w = 0, h = 0;
+    if (s_font && s[0] && TTF_SizeUTF8(s_font, s, &w, &h) == 0) return w / WINDOW_SCALE;
+#endif
+    return (int)strlen(s) * 8;
+}
+
+/* マスター設定のオーバーレイ(Phase 21b、Phase 22e で作り直した)。
  * **アプリのスロットを 1 つも使わず**、描画のいちばん最後に上から重ねる。
- * 座標と当たり判定は shared/master_ui.h(両ホストで同じ) */
+ * 形・座標・配色・当たり判定は shared/master_ui.h(両ホストで同じ) */
 void draw_master_overlay_if_open(void);
 static void draw_master_overlay(void)
 {
     char buf[16];
-    int v, fill;
     if (!masterui_is_open()) return;
+    const int editing = masterui_editing();
+    const bool blink = masterui_blink_on();
 
-    /* 帯は不透明(全画面の半透明は毎フレームのブレンドが高いので使わない) */
-    host_sdl_rect(0, 0, SCREEN_W, MASTERUI_BAND_H, 0x1a2234);
-    host_sdl_rect(0, MASTERUI_BAND_H - 2, SCREEN_W, 2, 0x305090);
-    draw_string(12, 8, "Settings", 0xffffff);
-    draw_string(MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
+    /* 黒の地を中緑の枠で囲む(帯は不透明。全画面の半透明は毎フレームのブレンドが高いので使わない) */
+    host_sdl_rect(0, 0, SCREEN_W, MASTERUI_BAND_H, MASTERUI_RGB_BG);
+    host_sdl_rect(MASTERUI_FRAME_X, MASTERUI_FRAME_Y, MASTERUI_FRAME_W, MASTERUI_FRAME_T, MASTERUI_RGB_FRAME);
+    host_sdl_rect(MASTERUI_FRAME_X, MASTERUI_FRAME_Y + MASTERUI_FRAME_H - MASTERUI_FRAME_T, MASTERUI_FRAME_W,
+                  MASTERUI_FRAME_T, MASTERUI_RGB_FRAME);
+    host_sdl_rect(MASTERUI_FRAME_X, MASTERUI_FRAME_Y, MASTERUI_FRAME_T, MASTERUI_FRAME_H, MASTERUI_RGB_FRAME);
+    host_sdl_rect(MASTERUI_FRAME_X + MASTERUI_FRAME_W - MASTERUI_FRAME_T, MASTERUI_FRAME_Y, MASTERUI_FRAME_T,
+                  MASTERUI_FRAME_H, MASTERUI_RGB_FRAME);
+    /* 題名と ✕ を枠の上辺に食い込ませる(文字の後ろを黒で抜く) */
+    host_sdl_rect(MASTERUI_TITLE_X - 6, MASTERUI_FRAME_Y - 2, text_width("Settings") + 12, 6, MASTERUI_RGB_BG);
+    draw_string(MASTERUI_TITLE_X, MASTERUI_TITLE_Y, "Settings", MASTERUI_RGB_TEXT);
+    host_sdl_rect(MASTERUI_CLOSE_SYM_X - 6, MASTERUI_FRAME_Y - 2, 24, 6, MASTERUI_RGB_BG);
+    draw_string(MASTERUI_CLOSE_SYM_X, MASTERUI_TITLE_Y + 2, MASTERUI_CLOSE_SYM, MASTERUI_RGB_CLOSE);
+    draw_string(MASTERUI_HINT_X, MASTERUI_HINT_Y, "flick the number, tap the bar", MASTERUI_RGB_HINT);
 
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         const int ry = MASTERUI_ROW_Y(i);
         const int ty = ry + 8;
-        /* ラベルの箱 = MUTE のトグル(Phase 21c)。状態は文字色: 緑 = 鳴る / 灰 = MUTE */
         const bool muted = masterui_is_muted((masterui_item_t)i);
-        const uint32_t on_col = muted ? 0x707880 : 0x40e070;
-        host_sdl_rect(MASTERUI_MUTE_X, ry, MASTERUI_MUTE_W, MASTERUI_ROW_H, 0x2a3340);
-        draw_string(MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i), on_col);
-        host_sdl_rect(MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
-        draw_string(MASTERUI_MINUS_X + 16, ty, "-", 0xffffff);
-        host_sdl_rect(MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
-        draw_string(MASTERUI_PLUS_X + 16, ty, "+", 0xffffff);
-        v = masterui_level((masterui_item_t)i);
+        const int v = masterui_level((masterui_item_t)i);
+        /* ラベルは文字だけ(タップ = MUTE。Phase 21c)。MUTE 中は文字・バー・数字が灰 */
+        draw_string(MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i),
+                    muted ? MASTERUI_RGB_MUTED : MASTERUI_RGB_TEXT);
+        host_sdl_rect(MASTERUI_BAR_X, ry + (MASTERUI_ROW_H - MASTERUI_BAR_H) / 2, MASTERUI_BAR_W, MASTERUI_BAR_H,
+                      MASTERUI_RGB_TRACK);
+        const int fill = MASTERUI_BAR_W * v / 100;
+        if (fill > 0)
+            host_sdl_rect(MASTERUI_BAR_X, ry + (MASTERUI_ROW_H - MASTERUI_BAR_H) / 2, fill, MASTERUI_BAR_H,
+                          muted ? MASTERUI_RGB_MUTED : MASTERUI_RGB_FILL);
+        /* 数字は右寄せ。変えている間は黄で点滅(ui-conventions §4) */
         snprintf(buf, sizeof(buf), "%d", v);
-        draw_string(MASTERUI_VALUE_X, ty, buf, on_col);
-        /* バー(要否は使ってから判断する。ユーザー指示) */
-        host_sdl_rect(MASTERUI_BAR_X, ry + 10, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
-        fill = MASTERUI_BAR_W * v / 100;
-        if (fill > 0) host_sdl_rect(MASTERUI_BAR_X, ry + 10, fill, MASTERUI_BAR_H, on_col);
+        draw_string(MASTERUI_NUM_RIGHT - text_width(buf), ty, buf,
+                    muted ? MASTERUI_RGB_MUTED
+                          : (editing == i && blink) ? MASTERUI_RGB_EDIT : MASTERUI_RGB_TEXT);
+        if (i < MASTERUI_ITEMS - 1)
+            host_sdl_rect(MASTERUI_SEP_X, ry + MASTERUI_ROW_PITCH - 2, MASTERUI_SEP_W, 1, MASTERUI_RGB_TRACK);
     }
+    /* 取っ手(上へ払うと閉じる) */
+    host_sdl_rect(MASTERUI_HANDLE_X, MASTERUI_HANDLE_Y, MASTERUI_HANDLE_W, MASTERUI_HANDLE_H, MASTERUI_RGB_HINT);
 }
 
 void draw_master_overlay_if_open(void) { draw_master_overlay(); }

@@ -433,7 +433,19 @@ int main(int argc, char** argv)
                            ev.type == SDL_MOUSEMOTION) {
                     int lx, ly;
                     host_sdl_window_to_logical(ev.motion.x, ev.motion.y, &lx, &ly);
-                    hover = menu_hit_test(lx, ly);
+                    if (masterui_is_open()) {
+                        /* 開いている間は押下中の移動を渡す(数字の押したまま・バーのスクラブ・取っ手。Phase 22e) */
+                        if (ev.motion.state & SDL_BUTTON_LMASK) masterui_on_touch(HOSTAPI_EV_TOUCH_MOVE, lx, ly);
+                        hover = -1;
+                    } else {
+                        hover = menu_hit_test(lx, ly);
+                    }
+                } else if (!app_running && !single_mode && ev.type == SDL_MOUSEBUTTONUP &&
+                           ev.button.button == SDL_BUTTON_LEFT && masterui_is_open()) {
+                    /* 離した位置で決める操作(数字のはじき・取っ手。Phase 22e) */
+                    int lx, ly;
+                    host_sdl_window_to_logical(ev.button.x, ev.button.y, &lx, &ly);
+                    masterui_on_touch(HOSTAPI_EV_TOUCH_UP, lx, ly);
                 } else if (!app_running && !single_mode &&
                            ev.type == SDL_MOUSEBUTTONDOWN &&
                            ev.button.button == SDL_BUTTON_LEFT) {
@@ -515,7 +527,7 @@ int main(int argc, char** argv)
                         continue;
                     }
                 }
-                masterui_tick(); /* `-` / `+` の長押し連打(Phase 21b)*/
+                masterui_tick(); /* 数字の押したままの連続変更と、変更中の点滅(Phase 22e)*/
                 host_sdl_render();
                 SDL_Delay(APP_TICK_MS);
             } else {

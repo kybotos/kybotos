@@ -89,6 +89,13 @@ add_executable(seq_core_test tests/seq_core_test.c
 target_include_directories(seq_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared)
 add_test(NAME seq_core_test COMMAND seq_core_test)
 
+# ---- shared/master_ui.c の単体テスト(Phase 22e)----
+# 偽の時計で、マスター設定の値の変え方(はじき・押したまま・バーのタップ / スクラブ)と閉じ方を確かめる。
+add_executable(master_ui_test tests/master_ui_test.c
+               ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/master_ui.c)
+target_include_directories(master_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../shared)
+add_test(NAME master_ui_test COMMAND master_ui_test)
+
 if(ALSA_FOUND)
     target_compile_definitions(kybotos_host PRIVATE HAVE_ALSA)
     target_include_directories(kybotos_host PRIVATE ${ALSA_INCLUDE_DIRS})

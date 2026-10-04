@@ -166,30 +166,42 @@ lv_obj_t* mui_label(lv_obj_t* parent, int x, int y, const char* txt, uint32_t rg
     return l;
 }
 
+// 実機の文字(Montserrat 14)は Linux の DejaVu より行の上の余白が大きいので、同じ見た目になるよう 2px 上げる
+constexpr int kMuiTextDy = -2;
+constexpr int kMuiNumW = 40; // 数字のラベルの幅(右寄せ)
+
 void mui_update_value()
 {
     if (!s_mui_band) return;
+    const int editing = masterui_editing();
+    const bool blink = masterui_blink_on();
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         if (!s_mui_value[i]) continue;
         char buf[8];
         const int v = masterui_level((masterui_item_t)i);
-        // 状態は文字色: 緑 = 鳴る / 灰 = MUTE(Linux の draw_master_overlay と同じ色)
-        const lv_color_t col =
-            lv_color_hex(masterui_is_muted((masterui_item_t)i) ? 0x707880 : 0x40e070);
+        // MUTE 中は文字・バー・数字が灰、変えている間は数字を黄で点滅(Linux の draw_master_overlay と同じ。Phase 22e)
+        const bool muted = masterui_is_muted((masterui_item_t)i);
+        const uint32_t num_rgb = muted ? MASTERUI_RGB_MUTED
+                                       : (editing == i && blink) ? MASTERUI_RGB_EDIT : MASTERUI_RGB_TEXT;
         snprintf(buf, sizeof(buf), "%d", v);
         lv_label_set_text(s_mui_value[i], buf);
-        lv_obj_set_style_text_color(s_mui_value[i], col, 0);
-        if (s_mui_name[i]) lv_obj_set_style_text_color(s_mui_name[i], col, 0);
+        lv_obj_set_style_text_color(s_mui_value[i], lv_color_hex(num_rgb), 0);
+        if (s_mui_name[i])
+            lv_obj_set_style_text_color(s_mui_name[i],
+                                        lv_color_hex(muted ? MASTERUI_RGB_MUTED : MASTERUI_RGB_TEXT), 0);
         if (s_mui_barfill[i]) {
             const int w = MASTERUI_BAR_W * v / 100;
-            lv_obj_set_width(s_mui_barfill[i], w > 0 ? w : 1);
-            lv_obj_set_style_bg_color(s_mui_barfill[i], col, 0);
+            lv_obj_set_width(s_mui_barfill[i], w);
+            lv_obj_set_style_bg_color(s_mui_barfill[i],
+                                      lv_color_hex(muted ? MASTERUI_RGB_MUTED : MASTERUI_RGB_FILL), 0);
         }
     }
 }
 
 void mui_input_cb(lv_event_t* e);
 
+// 帯の形・座標・配色は shared/master_ui.h(Linux と同じ。Phase 22e で作り直した):
+// 黒の地を中緑の枠で囲み、題名と ✕ を枠の上辺に食い込ませる。行は `[ラベル] [バー] [数字]`、下端に取っ手
 void mui_build()
 {
     if (s_mui_band) return;
@@ -206,25 +218,41 @@ void mui_build()
     lv_obj_add_event_cb(s_mui_catch, mui_input_cb, LV_EVENT_RELEASED, nullptr);
     lv_obj_add_event_cb(s_mui_catch, mui_input_cb, LV_EVENT_PRESSING, nullptr);
 
-    s_mui_band = mui_box(s_mui_catch, 0, 0, 320, MASTERUI_BAND_H, 0x1a2234);
-    mui_box(s_mui_band, 0, MASTERUI_BAND_H - 2, 320, 2, 0x305090);
-    mui_label(s_mui_band, 12, 8, "Settings", 0xffffff);
-    mui_label(s_mui_band, MASTERUI_CLOSE_X + 10, MASTERUI_CLOSE_Y + 6, "X", 0xf06060);
+    s_mui_band = mui_box(s_mui_catch, 0, 0, 320, MASTERUI_BAND_H, MASTERUI_RGB_BG);
+    constexpr int fx = MASTERUI_FRAME_X, fy = MASTERUI_FRAME_Y, fw = MASTERUI_FRAME_W, fh = MASTERUI_FRAME_H,
+                  ft = MASTERUI_FRAME_T;
+    mui_box(s_mui_band, fx, fy, fw, ft, MASTERUI_RGB_FRAME);
+    mui_box(s_mui_band, fx, fy + fh - ft, fw, ft, MASTERUI_RGB_FRAME);
+    mui_box(s_mui_band, fx, fy, ft, fh, MASTERUI_RGB_FRAME);
+    mui_box(s_mui_band, fx + fw - ft, fy, ft, fh, MASTERUI_RGB_FRAME);
+    // 題名と ✕ を枠の上辺に食い込ませる(文字の後ろを黒で抜く)
+    lv_obj_t* title = mui_label(s_mui_band, MASTERUI_TITLE_X, 0, "Settings", MASTERUI_RGB_TEXT);
+    lv_obj_update_layout(title);
+    mui_box(s_mui_band, MASTERUI_TITLE_X - 6, fy - 2, lv_obj_get_width(title) + 12, 6, MASTERUI_RGB_BG);
+    lv_obj_move_foreground(title);
+    mui_box(s_mui_band, MASTERUI_CLOSE_SYM_X - 6, fy - 2, 24, 6, MASTERUI_RGB_BG);
+    mui_label(s_mui_band, MASTERUI_CLOSE_SYM_X, MASTERUI_TITLE_Y + 2 + kMuiTextDy, MASTERUI_CLOSE_SYM,
+              MASTERUI_RGB_CLOSE);
+    mui_label(s_mui_band, MASTERUI_HINT_X, MASTERUI_HINT_Y + kMuiTextDy, "flick the number, tap the bar",
+              MASTERUI_RGB_HINT);
     for (int i = 0; i < MASTERUI_ITEMS; i++) {
         const int ry = MASTERUI_ROW_Y(i);
-        const int ty = ry + 6;
-        mui_box(s_mui_band, MASTERUI_MUTE_X, ry, MASTERUI_MUTE_W, MASTERUI_ROW_H, 0x2a3340);
-        s_mui_name[i] = mui_label(s_mui_band, MASTERUI_LABEL_X, ty,
-                                  masterui_label((masterui_item_t)i), 0x40e070);
-        mui_box(s_mui_band, MASTERUI_MINUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
-        mui_label(s_mui_band, MASTERUI_MINUS_X + 16, ty, "-", 0xffffff);
-        mui_box(s_mui_band, MASTERUI_PLUS_X, ry, MASTERUI_BTN_W, MASTERUI_ROW_H, 0x2a3340);
-        mui_label(s_mui_band, MASTERUI_PLUS_X + 16, ty, "+", 0xffffff);
-        mui_box(s_mui_band, MASTERUI_BAR_X, ry + 10, MASTERUI_BAR_W, MASTERUI_BAR_H, 0x2a3340);
-        s_mui_barfill[i] =
-            mui_box(s_mui_band, MASTERUI_BAR_X, ry + 10, 1, MASTERUI_BAR_H, 0x40e070);
-        s_mui_value[i] = mui_label(s_mui_band, MASTERUI_VALUE_X, ty, "0", 0x40e070);
+        const int ty = ry + 8 + kMuiTextDy;
+        const int by = ry + (MASTERUI_ROW_H - MASTERUI_BAR_H) / 2;
+        s_mui_name[i] = mui_label(s_mui_band, MASTERUI_LABEL_X, ty, masterui_label((masterui_item_t)i),
+                                  MASTERUI_RGB_TEXT);
+        mui_box(s_mui_band, MASTERUI_BAR_X, by, MASTERUI_BAR_W, MASTERUI_BAR_H, MASTERUI_RGB_TRACK);
+        s_mui_barfill[i] = mui_box(s_mui_band, MASTERUI_BAR_X, by, 0, MASTERUI_BAR_H, MASTERUI_RGB_FILL);
+        s_mui_value[i] = mui_label(s_mui_band, MASTERUI_NUM_RIGHT - kMuiNumW, ty, "0", MASTERUI_RGB_TEXT);
+        lv_obj_set_width(s_mui_value[i], kMuiNumW);
+        lv_obj_set_style_text_align(s_mui_value[i], LV_TEXT_ALIGN_RIGHT, 0);
+        if (i < MASTERUI_ITEMS - 1)
+            mui_box(s_mui_band, MASTERUI_SEP_X, ry + MASTERUI_ROW_PITCH - 2, MASTERUI_SEP_W, 1,
+                    MASTERUI_RGB_TRACK);
     }
+    // 取っ手(上へ払うと閉じる)
+    mui_box(s_mui_band, MASTERUI_HANDLE_X, MASTERUI_HANDLE_Y, MASTERUI_HANDLE_W, MASTERUI_HANDLE_H,
+            MASTERUI_RGB_HINT);
     mui_update_value();
 }
 
@@ -317,7 +345,7 @@ void screen_input_event_cb(lv_event_t* e)
     push_event(type, (int16_t)p.x, (int16_t)p.y);
 }
 
-// `-` / `+` の長押し連打(LVGL タイマ = LVGL タスク上)
+// 数字の押したままの連続変更と、変更中の点滅(LVGL タイマ = LVGL タスク上。Phase 22e)
 void mui_timer_cb(lv_timer_t*)
 {
     if (masterui_tick()) mui_update_value();
