@@ -171,14 +171,14 @@ const BPM_MIN: u32 = 40;
 const BPM_MAX: u32 = 240;
 const NUM_MAX: u32 = 16;
 const DEN_TABLE: [u32; 4] = [2, 4, 8, 16];
-/// BPM・分子・分母のドラッグ(位置で決まる。加速は無い。2026-10-04 の追記 2)。
-/// 押した位置からの変位で段数を決め、各軸とも最初の DRAG_DEAD_PX は 0 段(指の揺れ)
-const DRAG_DEAD_PX: i32 = 12;
-/// 上下: この px で 1 段(BPM は ±1、分子は ±1、分母は隣の値へ)
-const V_STEP_PX: i32 = 12;
-/// 左右: この px で 1 段(BPM だけ。±10)。BPM の数字は幅が広く、左右の余地は 100px 以上ある
-const H_STEP_PX: i32 = 24;
-const H_STEP_BPM: i32 = 10;
+/// BPM・分子・分母は上下に「はじく」(押して、すっと動かして離す)と変わる(2026-10-04 の追記 3)。
+/// 変わるのは離したときで、量は動かした距離と速さで決まる。この px 未満の移動は何もしない(タップ・指の揺れ)
+const FLICK_MIN_PX: i32 = 16;
+/// これより遅い動き(px/秒)は距離によらず ±1(ゆっくり動かせば 1 ずつ確実に変えられる)
+const FLICK_SLOW_PXS: i32 = 400;
+/// BPM の量: 速い動きの距離(px)→ 量。この距離未満なら左の量(表の外は最後の量)
+const FLICK_BPM: [(i32, u32); 2] = [(70, 1), (130, 5)];
+const FLICK_BPM_MAX: u32 = 10;
 /// 変更中の点滅の周期(ui-conventions §4)
 const BLINK_MS: u32 = 200;
 
@@ -221,11 +221,11 @@ static mut GESTURE: Gesture = Gesture::new();
 static mut TARGET: Target = Target::None;
 /// 値を変えている最中か(ドラッグが始まったら。点滅させる)
 static mut EDITING: bool = false;
-/// BPM のドラッグの起点
-static mut BPM0: u32 = 120;
-/// 分子・分母のドラッグの起点と、ドラッグ中の値(離したときに確定する。D11)
-static mut MET_NUM0: u32 = 4;
-static mut MET_DEN_IDX0: i32 = 1;
+/// はじきの速さを測る起点(押下後の最初の MOVE の時刻と y。MOVE が無ければ押下の時刻と y)
+static mut FLICK_T0: u32 = 0;
+static mut FLICK_Y0: i32 = 0;
+static mut FLICK_MOVED: bool = false;
+/// 分子・分母の確定前の値(離したときに確定する。D11)
 static mut EDIT_NUM: u32 = 4;
 static mut EDIT_DEN: u32 = 4;
 
@@ -471,7 +471,7 @@ fn draw_status() {
         let hint = !RUNNING;
         if hint != SHOWN_HINT {
             SHOWN_HINT = hint;
-            text(HINT_X, HINT_Y, if hint { b"drag up / down" } else { b"" }, TXT_HINT);
+            text(HINT_X, HINT_Y, if hint { b"flick up / down" } else { b"" }, TXT_HINT);
         }
     }
     draw_big_numbers();
@@ -705,34 +705,54 @@ fn den_index(den: u32) -> i32 {
     DEN_TABLE.iter().position(|&d| d == den).unwrap_or(1) as i32
 }
 
-/// 変位を段数にする(最初の DRAG_DEAD_PX は 0 段)
-fn drag_steps(d: i32, step_px: i32) -> i32 {
-    let a = (d.abs() - DRAG_DEAD_PX).max(0);
-    d.signum() * ((a + step_px - 1) / step_px)
+/// はじき 1 回で動かす段数(符号は上 = 正)。`dy` は押下から離すまでの上下の移動(下が正)、
+/// `fast_dy` / `fast_ms` は速さを測る区間の移動と時間
+fn flick_steps(target: Target, dy: i32, fast_dy: i32, fast_ms: u32) -> i32 {
+    let d = dy.abs();
+    if d < FLICK_MIN_PX {
+        return 0;
+    }
+    let sign = -dy.signum();
+    if target != Target::Bpm {
+        return sign; // 拍子は次の値へ 1 段だけ
+    }
+    let v = fast_dy.abs() * 1000 / fast_ms.max(1) as i32;
+    let mut n = FLICK_BPM_MAX;
+    if v < FLICK_SLOW_PXS {
+        n = 1;
+    } else {
+        for &(px, k) in FLICK_BPM.iter() {
+            if d < px {
+                n = k;
+                break;
+            }
+        }
+    }
+    sign * n as i32
 }
 
-/// ドラッグ: 押した位置からの変位(`dx` 右が正、`dy` 下が正)で値が決まる(位置。上 = 大きく)。
-/// BPM は上下で ±1、左右で ±10 で、演奏中はその場で反映する(次の拍の頭から。D11)。
-/// 分子・分母は上下だけで、確定は離したとき
-fn drag_value(dx: i32, dy: i32) {
+/// はじきを反映する。BPM は演奏中ならその場で(次の拍の頭から。D11)、拍子は end_edit で確定する(小節をやり直す)
+fn apply_flick(steps: i32) {
     unsafe {
         match TARGET {
             Target::Bpm => {
-                let v = BPM0 as i32 + drag_steps(-dy, V_STEP_PX) + H_STEP_BPM * drag_steps(dx, H_STEP_PX);
-                let v = v.clamp(BPM_MIN as i32, BPM_MAX as i32) as u32;
+                let v = (BPM as i32 + steps).clamp(BPM_MIN as i32, BPM_MAX as i32) as u32;
                 if v != BPM {
                     BPM = v;
                     apply_tempo();
                 }
             }
             Target::Num => {
-                EDIT_NUM = (MET_NUM0 as i32 + drag_steps(-dy, V_STEP_PX)).clamp(1, NUM_MAX as i32) as u32;
+                EDIT_NUM = (NUM as i32 + steps).clamp(1, NUM_MAX as i32) as u32;
             }
             Target::Den => {
-                let idx = (MET_DEN_IDX0 + drag_steps(-dy, V_STEP_PX)).clamp(0, DEN_TABLE.len() as i32 - 1);
+                let idx = (den_index(DEN) + steps).clamp(0, DEN_TABLE.len() as i32 - 1);
                 EDIT_DEN = DEN_TABLE[idx as usize];
             }
             _ => {}
+        }
+        if EDIT_NUM != NUM || EDIT_DEN != DEN {
+            EDITING = true;
         }
     }
 }
@@ -754,9 +774,6 @@ fn on_action(a: Action) {
             Action::Press { x, y } => {
                 TARGET = target_at(x, y);
                 EDITING = false;
-                BPM0 = BPM;
-                MET_NUM0 = NUM;
-                MET_DEN_IDX0 = den_index(DEN);
                 EDIT_NUM = NUM;
                 EDIT_DEN = DEN;
             }
@@ -765,17 +782,11 @@ fn on_action(a: Action) {
                 TARGET = Target::None;
                 toggle_run();
             }
-            // 触ってそのままドラッグ(Drag)で値を変える。長押ししてからのドラッグ(Shuttle)も同じに扱う
-            // (2026-10-04 の追記)。長押しが成立しただけでも点滅させる(掴んだ合図)
-            Action::LongPressArmed { .. } if is_value(TARGET) => {
+            // 値はアプリが UP で決める(はじき。app_tick)。押して動かしている間は点滅させる(掴んだ合図)。
+            // 長押ししてからでも同じ。Cancel(タップ / 長押しの取り消し)では何もしない
+            Action::LongPressArmed { .. } | Action::Drag { .. } | Action::Shuttle { .. } if is_value(TARGET) => {
                 EDITING = true;
             }
-            Action::Drag { dx, dy } | Action::Shuttle { dx, dy } if is_value(TARGET) => {
-                EDITING = true;
-                drag_value(dx, dy);
-            }
-            // 確定は離したとき(app_tick が UP のたびに end_edit を呼ぶ)。Cancel(タップ / 長押しの取り消し)では
-            // 終えない: ドラッグの閾値(24px)の手前の移動で Cancel が先に来る
             _ => {}
         }
     }
@@ -832,19 +843,31 @@ pub extern "C" fn app_tick() {
     };
     let now = unsafe { hostapi_now_ms() };
     for ev in &evs[..n.max(0) as usize] {
-        // 値は「離した位置」で決める。実機は前に届けた位置から 8px 動いたときだけ MOVE を届けるので、
-        // 最後の数 px は UP にしか入らないことがある(UP には最終座標が入る。shared/hostapi_defs.h)。
-        // Gesture は UP の座標を使わないので、ここで拾う(Phase 22b ステップ 5 で実機の 32px のドラッグが 1 段足りなかった)。
-        // ドラッグの閾値(24px)に届く前に離した場合も、ここで DRAG_DEAD_PX を超えていれば効く
+        // はじき: 離したときに、押下からの上下の移動と、最初の MOVE から離すまでの速さで量を決める。
+        // 移動は UP の座標で測る(実機は前に届けた位置から 8px 動いたときだけ MOVE を届けるので、最後の数 px は
+        // UP にしか入らないことがある。UP には最終座標が入る。shared/hostapi_defs.h)。Gesture は UP の座標を使わないので、ここで見る
         unsafe {
-            let g = &*addr_of!(GESTURE);
-            if ev.ev_type == appui::EV_TOUCH_UP && is_value(TARGET) {
-                if let Some((px, py)) = g.press_pos() {
-                    drag_value(ev.x as i32 - px, ev.y as i32 - py);
-                    if EDIT_NUM != NUM || EDIT_DEN != DEN {
-                        EDITING = true;
+            let y = ev.y as i32;
+            match ev.ev_type {
+                appui::EV_TOUCH_DOWN => {
+                    FLICK_T0 = ev.time_ms;
+                    FLICK_Y0 = y;
+                    FLICK_MOVED = false;
+                }
+                appui::EV_TOUCH_MOVE if !FLICK_MOVED => {
+                    FLICK_T0 = ev.time_ms;
+                    FLICK_Y0 = y;
+                    FLICK_MOVED = true;
+                }
+                appui::EV_TOUCH_UP if is_value(TARGET) => {
+                    if let Some((_, py)) = (*addr_of!(GESTURE)).press_pos() {
+                        let steps = flick_steps(TARGET, y - py, y - FLICK_Y0, ev.time_ms.wrapping_sub(FLICK_T0));
+                        if steps != 0 {
+                            apply_flick(steps);
+                        }
                     }
                 }
+                _ => {}
             }
         }
         let a = unsafe {

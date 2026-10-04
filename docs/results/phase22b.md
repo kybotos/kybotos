@@ -272,3 +272,22 @@
     mp3player 19,112、hostapi_check 34,728(不変)。デモ 38 手順 PASS。
   - 実機の回帰 3 本 PASS(`captures/phase22b-r3-device-regress`): 開始時 free_int 150,264・largest_int 98,304(5-1 と同じ)、metronome ×3 の差分 +0、
     許容外の WARN / ERROR 0 件。デモ 38 手順 PASS(`phase22b-r3-device-demo`)。
+
+### 5-6. 上下に「はじく」(指示書の「追記 (2026-10-04, 3)」)
+
+5-5 の版を触ったユーザーの判断: 位置で 1 ずつ合わせるのが難しい。左右をやめ、上下に「はじく」操作にする。
+
+- **値は離したときに 1 回だけ変わる**(押している間は対象が点滅するだけ)。押下から離すまでの上下の移動が **16px 未満なら何もしない**。
+- **BPM**: 速さ(最初の MOVE から離すまで。px/秒)が **400 未満なら距離によらず ±1**(ゆっくり動かせば 1 ずつ確実に変えられる)。
+  速ければ距離で **70px 未満 ±1、130px 未満 ±5、それ以上 ±10**。演奏中は次の拍の頭から反映(D11 の書き方のまま)。
+- **分子・分母**: 1 回で 1 段(分母は 2 / 4 / 8 / 16 の隣へ)。確定は離したとき(小節をやり直す)。
+- 移動は UP の座標で測る(5-2 の 2 と同じ理由)。位置で値を決めるコード(`drag_value` と起点の値)は消した。手引きは `flick up / down`。
+- 注入の `drag` は 8 段 × 40ms で動かすので、Linux・実機とも **36px は ±1、170px は約 530px/秒で ±10**(±5 の段は注入の速さでは届かない。人の操作で見る)。
+- **回帰のシナリオ**: `expect 120bpm; expect 4/4; expect flick up / down; drag 100 110 0 -36 0; expect 121bpm; drag 100 180 0 -170 0; expect 131bpm;
+  expect ▶; tap 300 38; expect ■; wait 2; drag 270 85 0 -36 0; expect 5/4; drag 270 150 0 -36 0; expect 5/8; expect ■; wait 1; tap 300 38; expect ▶`。
+  デモは BPM 120 → 121 → 122 → 123 → 133 → 123、拍子 4/4 → 5/4 → 6/4 → 6/8 → 7/8 → 7/16 → 6/16 → 5/16 → 5/8 → 5/4。
+- **結果**:
+  - Linux の回帰 3 本 PASS(`captures/phase22b-r4-linux-regress`): metronome highmark **32,672**(`.wasm` 7.2KB。基準はこの値に取り直す)、
+    mp3player 19,112、hostapi_check 34,728(不変)。デモ 46 手順 PASS。
+  - 実機の回帰 3 本 PASS(`captures/phase22b-r4-device-regress`): 開始時 free_int 150,264・largest_int 98,304(5-1 と同じ)、metronome ×3 の差分 +0、
+    許容外の WARN / ERROR 0 件。デモ 46 手順 PASS(`phase22b-r4-device-demo`)。
