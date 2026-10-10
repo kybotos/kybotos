@@ -1,7 +1,7 @@
 # Phase 24b 実施記録: CrowPanel の音と SD(回帰 3 本 PASS)
 
 - 指示書: `docs/prompts/phase24b.md`
-- 状態: **ステップ 0 承認済み(2026-10-10)。ステップ 1 へ**
+- 状態: **完了(2026-10-10)**。一覧のスワイプと Waveshare の実機の回帰は 24c へ持ち越し(指示書の追記)
 
 ---
 
@@ -57,3 +57,57 @@ MP3 を最後まで続けて再生して途切れないこと(ユーザーの耳
 ### 0-c ユーザーの承認(2026-10-10)
 
 設計メモ a〜d を承認。
+
+---
+
+## ステップ 1: 実装(2026-10-10。コミットは下の表)
+
+- `audio.cpp`: `amp_init_off()` を `amp_set(bool on)` にし、`Audio_Init` / `Audio_Click_Init` の初回だけ「OFF の水準で出力にする → I2S の初期化 → ON の水準」。
+  以後つけたまま。ログは `amplifier enable pin GPIO21: off` → `on`(10ms 後)。
+- mono の MP3 の I2S の設定、SD の設定、回帰の conf は変えていない(設計メモ b〜d)。
+- **Waveshare の `audio.cpp.obj` の逆アセンブル(`objdump -d -r`)は、変更の前後で完全に一致**(`captures/phase24b/audio-obj-{before,after}.txt`)。
+  アンプのピンが `GPIO_NUM_NC` のボードでは、`amp_set` はコンパイル時に消える。
+
+## ステップ 2: 確認(2026-10-10)
+
+**CrowPanel の回帰 3 本**(`KYBOTOS_DEV_APPS=1` で焼き、`device-regress.sh --board crowpanel_adv28`。`captures/phase24b-crowpanel/report.md`)
+
+| アプリ | 開始 free_int | 終了 free_int | 差分 | largest_int | シナリオ | 判定 |
+|---|---|---|---|---|---|---|
+| metronome ×3 | 155,456 | 155,456 | +0 | 106,496 | PASS(19 手順) | PASS |
+| mp3player | 155,456 | 154,984 | −472 | 106,496 | PASS(17 手順) | PASS |
+| hostapi_check | 154,984 | 154,808 | −176 | 106,496 | PASS(6 手順) | PASS |
+
+**PASS**(WARN / ERROR 0 件)。**今の共通のしきい値と `EXPECT_DELTA` のままで通った**ので、conf は変えていない(設計メモ d)。
+
+**CrowPanel の基準値**(記録のみ): 開始時の free_int **155,456** / largest_int **106,496**(Waveshare は 150,232 / 98,304。電源キーのタスクが無いことなどで +5,224 / +8,192)、
+`EXPECT_DELTA` は Waveshare と同じ(mp3player −472 / hostapi_check −176)、metronome の highmark **25,744**(同じ)、free_psram 8,136,668(同じ)。
+
+**耳**(ユーザー)
+
+| 確認 | 結果 |
+|---|---|
+| 起動音、metronome のクリック、mono の MP3 | ✅(0-a) |
+| `synth_probe`(内蔵音源のドラム 4 音と音階、約 16 秒) | ✅ 欠けや割れなし |
+| mp3player を指で: 再生 | ✅ ユーザーが足した長い曲(`3 Views Of A Secret.mp3`)を含めて途切れずに再生(ログに WARN / ERROR なし) |
+| Settings の音量のバー | ✅ 大きさが変わる |
+
+**SD**: 回帰の hostapi_check のファイルの読み書き(`fs_write` / `fs_read`)が PASS。MP3 の連続再生も途切れなし。
+
+**持ち越し**(指示書の追記): mp3player の一覧の縦スワイプ(SD の曲が 4 曲で一覧が送られない)、Waveshare の実機の回帰(オブジェクトの一致で代えた)。
+
+## ステップ 3: 後片付けと文書(2026-10-10)
+
+- CrowPanel を普段使い(`KYBOTOS_DEV_APPS=0`)のファームに戻し、共用の SD から検査用の 3 本を `rm` で消した(SD のアプリは sequencer / metronome / mp3player)。
+  Waveshare は 24a の終わりの普段使いのファームのまま(このフェーズの変更はオブジェクトが同じなので、焼き直していない)。
+- README のボードの表、roadmap(24b を done に、24c に持ち越しの 2 項目)、status、lessons(ESP32-S3 の mono の I2S は R にも出る)。
+
+## 完了条件の確認
+
+| 完了条件 | 結果 |
+|---|---|
+| 1. 起動音・クリック・内蔵音源・mono の MP3 が鳴る、ポップ音・ノイズの所見 | ✅ |
+| 2. CrowPanel で回帰 3 本 PASS、基準値の記録 | ✅ |
+| 3. SD: 連続再生、読み書き、一覧の縦スワイプ | ✅(スワイプだけ 24c へ。追記) |
+| 4. Waveshare: 回帰 3 本 PASS、数値が 24a と同じ | **24c へ**(追記)。`audio.cpp.obj` は完全に一致 |
+| 5. 普段使いのファームに戻し、検査用アプリを消す、記録 | ✅ |

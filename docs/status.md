@@ -944,3 +944,7 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - タッチの IC は FT6336U(0x38、チップ ID 0x64)。`touch.cpp` の中で IC ごとの読み出しだけを分け、回転と学習の初期範囲をボードの記述へ移した。リセットも INT も使わない。
   - CrowPanel を指で Waveshare と同じように操作できる(押した感じも同じ、とユーザー)。Waveshare は回帰 3 本 PASS・数値は Phase 24 と同じ。
   - 実機: Waveshare を普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、共用の SD から検査用アプリを消した。CrowPanel も普段使いのファーム。
+- **Phase 24b(CrowPanel の音と SD)完了。** 詳細は `docs/results/phase24b.md`。
+  - オンボードのアンプ(NS4168)を起動時に on にした。起動音・クリック・内蔵音源・MP3(mono も)が鳴り、音量も効く。CrowPanel で回帰 3 本 PASS(共通のしきい値のまま)。
+  - mp3player の一覧の縦スワイプ(曲が足りない)と Waveshare の実機の回帰(`audio.cpp.obj` は一致)は 24c へ持ち越し。
+  - 実機: CrowPanel は普段使いのファーム、共用の SD の検査用アプリは消した。Waveshare は 24a の終わりのファームのまま。
