@@ -22,6 +22,15 @@
 #error "No board selected (CONFIG_KYBOTOS_BOARD_*)"
 #endif
 
+// A board may have the power key without the self-hold latch (KB_HAS_POWER_KEY 1, KB_HAS_POWER_LATCH 0):
+// the key then gives back / forced home only, and the long press does not power off.
+#ifndef KB_HAS_POWER_KEY
+#define KB_HAS_POWER_KEY KB_HAS_POWER_LATCH
+#endif
+#if KB_HAS_POWER_KEY && !KB_HAS_POWER_LATCH && !defined(PIN_PWR_LATCH)
+#define PIN_PWR_LATCH GPIO_NUM_NC
+#endif
+
 #ifndef KB_AMP_EN_ON_LEVEL
 #define KB_AMP_EN_ON_LEVEL 1
 #endif

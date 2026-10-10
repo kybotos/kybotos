@@ -35,7 +35,7 @@ extern "C" void app_main()
     // 焼き間違いに気づけるよう、最初にボードの名前を出す(Phase 24)
     ESP_LOGI(TAG, "board: %s", CONFIG_KYBOTOS_BOARD_NAME);
 
-#if KB_HAS_POWER_LATCH
+#if KB_HAS_POWER_KEY
     PowerKey::Config cfg;
     cfg.key_pin = PIN_PWR_KEY_IN;
     cfg.latch_pin = PIN_PWR_LATCH;
@@ -93,8 +93,9 @@ extern "C" void app_main()
     // 停止する(app_key を持たない既存アプリは即終了のまま)。
     // コールバックは power_key タスク(小スタック)上なので atomic 操作のみ。
     // 消灯中の短押しは「復帰」も兼ねる(要求フラグを立てるだけ。LVGL には触らない)
-    // 電源キーの無いボード(KB_HAS_POWER_LATCH 0)では、戻る / ホームはシリアルの key だけ(Phase 24。ボタンの割り当ては 24c)
-#if KB_HAS_POWER_LATCH
+    // 電源キーの無いボード(KB_HAS_POWER_KEY 0)では、戻る / ホームはシリアルの key だけ(Phase 24)。
+    // ラッチの無いボード(CrowPanel の IO1 のキー)では、長押しの電源断は起きない(battery_mode にならない)
+#if KB_HAS_POWER_KEY
     pwr.set_on_short_press([](void*) {
         wasmrt::screensaver_request_wake();
         wasmrt::app_request_key_back();

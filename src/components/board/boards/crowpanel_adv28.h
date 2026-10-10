@@ -2,7 +2,7 @@
 // Selected by CONFIG_KYBOTOS_BOARD_CROWPANEL_ADV28 (board_pins.hpp). Phase 24.
 // Pins checked against the net names of the V1.2 schematic (docs/results/phase24.md 0-b).
 // Do not drive anything not listed here: GPIO14 (TFT_PWR, parts NC), GPIO45 (mic / wireless
-// switch, strapping pin), GPIO0/1/2/3/9/10/46 (wireless adapter) are left alone.
+// switch, strapping pin), GPIO0/2/3/9/10/46 (wireless adapter) are left alone. GPIO1 is the home key.
 #pragma once
 
 // ---- LCD (ST7789, SPI2). No reset pin: the panel has its own RC reset ----
@@ -45,8 +45,12 @@
 #define PIN_AMP_EN     GPIO_NUM_21  // IO21_NS_CTRL. LOW = amplifier on (vendor example)
 #define KB_AMP_EN_ON_LEVEL 0
 
-// ---- No power key / latch on this board ----
+// ---- Home key: a push switch between IO1 (J9 TX2, wireless adapter) and GND, internal pull-up ----
+// Same key handling as the Waveshare power key (short press = back, 1 s or more = forced home),
+// but there is no self-hold latch, so the long press does not power off.
+#define KB_HAS_POWER_KEY   1
 #define KB_HAS_POWER_LATCH 0
+#define PIN_PWR_KEY_IN     GPIO_NUM_1
 
 // ---- MIDI (UART1 on the J6 3.3V-UART1 connector; circuit to be wired in Phase 24c) ----
 #define PIN_MIDI_TX    GPIO_NUM_17

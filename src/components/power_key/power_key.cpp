@@ -61,6 +61,19 @@ void PowerKey::init() noexcept {
         gpio_set_pull_mode(cfg_.key_pin, GPIO_FLOATING);
     }
 
+    // No self-hold latch (latch_pin = NC): the key gives back / forced home only.
+    // battery_mode_ stays false, so the long press never powers off.
+    if (cfg_.latch_pin == GPIO_NUM_NC) {
+        battery_mode_ = false;
+        ESP_LOGI(TAG, "Key on GPIO%d without latch: back / force-home only", (int)cfg_.key_pin);
+        raw_prev_       = read_raw();
+        raw_edge_ts_    = xTaskGetTickCount();
+        pressed_stable_ = raw_prev_;
+        press_start_    = 0;
+        shutdown_issued_= false;
+        return;
+    }
+
     // Self-hold pin
     gpio_conf(cfg_.latch_pin, GPIO_MODE_OUTPUT);
 
