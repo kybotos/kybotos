@@ -111,3 +111,29 @@ MP3 を最後まで続けて再生して途切れないこと(ユーザーの耳
 | 3. SD: 連続再生、読み書き、一覧の縦スワイプ | ✅(スワイプだけ 24c へ。追記) |
 | 4. Waveshare: 回帰 3 本 PASS、数値が 24a と同じ | **24c へ**(追記)。`audio.cpp.obj` は完全に一致 |
 | 5. 普段使いのファームに戻し、検査用アプリを消す、記録 | ✅ |
+
+## 追加: ホームキー(IO1)(2026-10-10)
+
+指示書の追記「ホームキー(IO1)を足す」。
+
+**配線**(ユーザー): IO1(J9 の TX2)と GND の間に押しボタン。外付けの抵抗は無し。
+
+**変更**
+
+| ファイル | 内容 |
+|---|---|
+| `board_pins.hpp` | `KB_HAS_POWER_KEY` を足す。ボードの記述に無ければ `KB_HAS_POWER_LATCH` と同じ値。キーがあってラッチが無いボードでは `PIN_PWR_LATCH` を `GPIO_NUM_NC` にする |
+| `boards/crowpanel_adv28.h` | `KB_HAS_POWER_KEY 1`、`PIN_PWR_KEY_IN GPIO_NUM_1`(`KB_HAS_POWER_LATCH 0` のまま) |
+| `power_key.cpp` | ラッチのピンが NC なら、ラッチの設定をせず `battery_mode_` を false のままにする(長押しの電源断は起きない)。キーは内部プルアップの入力で LOW が押下、チャタリングの吸収(50ms)は Waveshare と同じ処理 |
+| `app_main.cpp` | キーのタスクとコールバックを `#if KB_HAS_POWER_LATCH` から `#if KB_HAS_POWER_KEY` に |
+
+Waveshare は `KB_HAS_POWER_KEY` = `KB_HAS_POWER_LATCH` = 1 なので `app_main.cpp` は同じコードになる。`power_key.cpp` には実行時の分岐(ラッチのピンが NC か)が 1 つ増える。
+Waveshare のビルドは通る(`captures/homekey/build-waveshare.log`)。実機の回帰は、24c に持ち越した回帰でまとめて確かめる。
+
+**CrowPanel での確認**(普段使いのファーム、`captures/homekey/monitor.log`)
+
+- 起動ログ: `PWR_KEY: Key on GPIO1 without latch: back / force-home only`。
+- 短押しで戻る: mp3player と sequencer で `app: key back -> stop` → メニュー。
+- 長めに押して強制ホーム: sequencer で `app: forced home` → メニュー。
+- メニューの状態の free_int は **150,240**、largest_int 98,304(キーのタスクを持つ Waveshare の 150,232 とほぼ同じ)。
+

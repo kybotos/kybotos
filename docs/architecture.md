@@ -782,7 +782,7 @@ L0 は `FIRE_ADVANCE_US = 20µs` 前にしか発火しないので、**先行時
   共通の `sdkconfig.defaults` の後に足し、その断片が choice を選ぶ。sdkconfig は「無いときだけ」defaults から作られるので、
   **ボードごとにビルドディレクトリと sdkconfig を分け**、食い違えば `src/CMakeLists.txt` が止める。
   既定のボードは今までの `src/build` / `src/sdkconfig` のまま(既存のコマンドとこの repo の外のビルドは変わらない)。
-- **ボードの記述**: ピンと「持っている機能」(`KB_HAS_POWER_LATCH`、`KB_TOUCH_IC`、アンプの有効化のピン、LCD の向き、SDMMC の有無)を
+- **ボードの記述**: ピンと「持っている機能」(`KB_HAS_POWER_KEY` / `KB_HAS_POWER_LATCH`、`KB_TOUCH_IC`、アンプの有効化のピン、LCD の向き、SDMMC の有無)を
   **1 枚 1 ファイル**の `src/components/board/boards/<board>.h` に置き、`board_pins.hpp` が選ぶ。**コンパイル時に決め、実行時に判別しない**
   (誤ったボードのピンを叩く前に判別する手段が無い)。違いはホストの中で吸収し、Host API / ABI と `.wasm` はボードによらない。
 - **焼き間違いの防止**: 起動ログの最初に `APP: board: <board>`。`scripts/fw.sh flash` は、ビルドの sdkconfig のボードが指定と違えば止める。

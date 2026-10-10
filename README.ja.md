@@ -28,7 +28,7 @@ MIDI の入出力(UART)をつないだものです。
 | ボード | 名前(`KYBOTOS_BOARD`) | 状態 |
 |---|---|---|
 | Waveshare ESP32-S3-Touch-LCD-2.8 | `waveshare_lcd28`(既定) | すべての機能 |
-| Elecrow CrowPanel Advance 2.8"(V1.2) | `crowpanel_adv28` | 対応中: 画面・タッチ・音(オンボードのアンプ)・SD・シリアルのコマンド(ネイティブ USB の USB-C)。MIDI はこれから(`docs/roadmap.md`) |
+| Elecrow CrowPanel Advance 2.8"(V1.2) | `crowpanel_adv28` | 対応中: 画面・タッチ・音(オンボードのアンプ)・SD・ホームキー(IO1 の外付けボタン)・シリアルのコマンド(ネイティブ USB の USB-C)。MIDI はこれから(`docs/roadmap.md`) |
 
 ## ファームウェアのビルドと書き込み
 

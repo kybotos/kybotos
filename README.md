@@ -30,7 +30,7 @@ The board is selected at build time (Phase 24).
 | Board | Name (`KYBOTOS_BOARD`) | Status |
 |---|---|---|
 | Waveshare ESP32-S3-Touch-LCD-2.8 | `waveshare_lcd28` (default) | Everything |
-| Elecrow CrowPanel Advance 2.8" (V1.2) | `crowpanel_adv28` | In progress: display, touch, audio (on-board amplifier), SD, serial commands (on the native-USB USB-C). MIDI follows (`docs/roadmap.md`) |
+| Elecrow CrowPanel Advance 2.8" (V1.2) | `crowpanel_adv28` | In progress: display, touch, audio (on-board amplifier), SD, home key (external button on IO1), serial commands (on the native-USB USB-C). MIDI follows (`docs/roadmap.md`) |
 
 ## Building and flashing the firmware
 
