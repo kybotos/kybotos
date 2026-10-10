@@ -1,7 +1,7 @@
 # Phase 24a 実施記録: CrowPanel のタッチ(FT6336)
 
 - 指示書: `docs/prompts/phase24a.md`
-- 状態: **ステップ 0 承認済み(2026-10-10)。ステップ 1 へ**
+- 状態: **完了(2026-10-10)**。次は Phase 24b(音と SD)
 
 ---
 
@@ -91,3 +91,78 @@ I2C は port 1、100kHz、SDA=IO15 / SCL=IO16。INT(IO47)は内部プルアッ�
 ### 0-c ユーザーの承認(2026-10-10)
 
 設計メモ a〜e を承認(同じファイルの中で `#if` で分ける、リセットも INT も使わない、を含む)。
+
+---
+
+## ステップ 1: 実装(2026-10-10。コミット `69e06ad`)
+
+| 変更 | 内容 |
+|---|---|
+| `board_pins.hpp` | `KB_TOUCH_IC_FT6336`(2) |
+| `boards/crowpanel_adv28.h` | `KB_TOUCH_IC_FT6336`、`KB_TOUCH_RAW_W/H` = 240 / 320、`KB_TOUCH_ROT` = 1、学習の初期範囲 0〜239 / 0〜319。INT / RST は「使わない」と注記 |
+| `boards/waveshare_lcd28.h` | `KB_TOUCH_ROT` = 1、学習の初期範囲 1〜239 / 6〜298(`touch.cpp` から移した。値は同じ) |
+| `touch.cpp` | `TOUCH_ROT` と学習の初期値をボードの記述から読む。`#if KB_TOUCH_IC == KB_TOUCH_IC_FT6336` で、8 bit のレジスタの読み出し、`read_raw_point`(`0x02`〜`0x06` を 5 バイト、点の数が 1〜2 でイベントが「離した」でなければ押している)、初期化(I2C のスキャン、0x38 を足してチップ ID・ファームの版・ベンダー ID をログ、応答が無ければタッチ無しで続ける)。ログのタグは `TOUCH_FT6336`。CST328 の部分は `#else` 側にそのまま |
+
+- **設計メモ c から外した点**: 「CST328 が分解能を読めないときは `KB_TOUCH_RAW_W/H` を使う」は入れなかった。Waveshare の経路のコードが変わり、読めなかった例も無いため。
+  `KB_TOUCH_RAW_W/H` は FT6336 だけが使う。
+- **Waveshare の経路は変わっていない**: Waveshare のビルドの `touch.cpp.obj` の逆アセンブル(`objdump -d -r`)を変更の前後で比べた
+  (`captures/phase24a/touch-obj-{before,after}.txt`)。違いは `movi a12, <即値>` の 4 か所だけで、どれも `ESP_ERROR_CHECK` が渡す**行番号**
+  (FT6336 の部分を前に足したので +76 行。0x1e5 → 0x231 = 485 → 561 など)。
+
+## ステップ 2: CrowPanel での確認(2026-10-10)
+
+起動ログ: `TOUCH_FT6336: Touch online port=1 addr=0x38 chip_id=0x64 fw=0x03 vendor=0x88, X_MAX=240, Y_MAX=320`。
+
+**座標**(一時に `DEBUG_TOUCH_CURSOR` を有効にしたファーム。ユーザーが角ぎりぎりと中央を押した。`captures/phase24a/cursor.log`)
+
+| 押した場所 | 生の座標 → LVGL の座標 |
+|---|---|
+| 左上 | (239, 3) → **(3, 0)** |
+| 右上 | (236, 319) → **(319, 3)**、(239, 319) → (319, 0) |
+| 左下 | → **(5, 227)** |
+| 右下 | → **(319, 235)** |
+| 中央 | → **(165, 118)**(続けて押した中央 (165, 113) でメニューの 3 行目 sequencer が起動した) |
+
+- 4 辺とも端まで届く(下端は 235 で、239 の 4px 手前)。中央は論理座標の中央 (160, 120) から数 px。範囲の学習は初期値(0〜239 / 0〜319)のままで広がらなかった。
+- 一時のコードは `git checkout` で外した(`git diff` 0 行)。
+
+**操作**(普通のファーム。ユーザーが指で操作し、カメラで録画 `captures/phase24a/cam_rec_155154.mp4`、ログ `captures/phase24a/ops.log`)
+
+| 操作 | 結果 |
+|---|---|
+| メニューから metronome を起動 | ✅(指の (141, 137) = 6 行のメニューの 4 行目 metronome、y 122〜146 の中) |
+| metronome: ▶ / ■、BPM と拍子のはじき、BPM の押したまま | ✅ `texts` で `105bpm`、`4/2`(120 / 4/4 から変わった)。WARN / ERROR 0 件 |
+| Settings: 開く、バーのタップとスクラブ、取っ手を上へ払って閉じる | ✅(ユーザーの確認) |
+| mp3player の一覧の縦スワイプ | **未確認**: SD の曲が 7 曲以下で一覧が送られない。縦の払いそのものは Settings の取っ手と metronome のはじきで確認済み。**曲を足す 24b で確かめる** |
+| スクリーンセーバーをタッチで解除 | ✅ `screensaver on (idle 60 s)` → タップで `wake`、そのタップでアプリは起動しなかった |
+| 押した感じ | **Waveshare と全く変わらない**(ユーザー) |
+
+- 途中でユーザーが意図せず synth_probe を起動した(共用の SD に Waveshare の回帰用のファームが置いた検査用アプリが残っていた)。
+  ユーザーの依頼で、シリアルの `rm` で hostapi_check / midi_loopback / synth_probe を消した(SD は sequencer / metronome / mp3player の 3 本)。
+  synth_probe の停止時の free_int −36 B は、初めて MP3 を鳴らしたときの一度きりの確保(U-23)。
+
+**注入と指の一致**: 指で metronome を起動した座標 (141, 137) は 6 行のメニューの metronome の行の中(`launcher_theme.h`: 1 行目の上端 38、高さ 24、間隔 4)。
+検査用アプリを消して 3 行になった後、metronome の行(y 66〜90)の中の `tap 141 78` で metronome が起動した。
+座標のテストで指で押した中央 (165, 113) も、6 行のときの sequencer の行(y 94〜118)の中で、sequencer が起動している。指と注入は同じ座標系で同じ部品に当たる。
+
+**Waveshare(ゲート 2)**: `KYBOTOS_DEV_APPS=1` で焼き、`device-regress.sh --board waveshare_lcd28`(`captures/phase24a-waveshare/report.md`)。
+**PASS**。開始時の free_int **150,232**、largest_int **98,304**、metronome の反復 3 回 +0、mp3player −472 / hostapi_check −176、WARN / ERROR 0 件、
+metronome の highmark **25,744**、`TOUCH_CST328: Touch online port=1 addr=0x1A`。**Phase 24 と同じ**。
+その後、Waveshare を普段使い(`KYBOTOS_DEV_APPS=0`)のファームに戻し、共用の SD から検査用の 3 本を `rm` で消した。
+
+## ステップ 3: 文書(2026-10-10)
+
+- README / README.ja: ボードの表の CrowPanel の状態(タッチを足した)。
+- roadmap: 24a を done に。24b に「mp3player の一覧の縦スワイプ」を足した。
+- lessons: 1 件(Waveshare の経路が変わっていないことを、オブジェクトの逆アセンブルの比較で確かめる)。
+- workflow: 変更なし(ボードの指定・ポートは Phase 24 のまま使えた)。
+
+## 完了条件の確認
+
+| 完了条件 | 結果 |
+|---|---|
+| 1. 指でメニューからアプリを起動、metronome・Settings・mp3player の一覧・スクリーンセーバーの解除 | ✅(mp3player の一覧の縦スワイプだけは曲数が足りず 24b へ。縦の払いは Settings の取っ手で確認) |
+| 2. 四隅と中央で座標が合う、注入と指で同じ部品が反応する | ✅ |
+| 3. チップ ID などのレジスタの値、リセット・INT の扱い | ✅ 0-a、0-b b |
+| 4. Waveshare: 回帰 3 本 PASS、数値が Phase 24 と同じ、Host API / ABI・`.wasm` 不変 | ✅ |
+| 5. 記録 | ✅ |

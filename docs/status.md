@@ -939,4 +939,8 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
     既定は Waveshare で、今までのコマンドとビルドディレクトリのまま。
   - Waveshare: 回帰 3 本 PASS、数値は Phase 23 と同じ(開始時の free_int 150,232)。
   - CrowPanel: 画面・SD・シリアルのコマンド(ネイティブ USB 側の USB-C)が動く。タッチ(FT6336、24a)、音(24b)、MIDI(24c)はこれから。
-  - 実機: Waveshare は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームのまま。CrowPanel は普段使い(OFF)のファーム。
+  - 実機: Waveshare は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームのまま。CrowPanel は普段使い(OFF)のファーム。(24a で Waveshare も OFF に戻した)
+- **Phase 24a(CrowPanel のタッチ)完了。** 詳細は `docs/results/phase24a.md`。
+  - タッチの IC は FT6336U(0x38、チップ ID 0x64)。`touch.cpp` の中で IC ごとの読み出しだけを分け、回転と学習の初期範囲をボードの記述へ移した。リセットも INT も使わない。
+  - CrowPanel を指で Waveshare と同じように操作できる(押した感じも同じ、とユーザー)。Waveshare は回帰 3 本 PASS・数値は Phase 24 と同じ。
+  - 実機: Waveshare を普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、共用の SD から検査用アプリを消した。CrowPanel も普段使いのファーム。
