@@ -25,6 +25,13 @@ The same `.wasm` runs on the ESP32-S3 device and on a Linux host.
 The target hardware is the **Waveshare ESP32-S3-Touch-LCD-2.8** (320×240 touch LCD, I2S audio output, SD card)
 with MIDI in/out wired to a UART.
 
+The board is selected at build time (Phase 24).
+
+| Board | Name (`KYBOTOS_BOARD`) | Status |
+|---|---|---|
+| Waveshare ESP32-S3-Touch-LCD-2.8 | `waveshare_lcd28` (default) | Everything |
+| Elecrow CrowPanel Advance 2.8" (V1.2) | `crowpanel_adv28` | In progress: display, SD, serial commands (on the native-USB USB-C). Touch, audio and MIDI follow (`docs/roadmap.md`) |
+
 ## Building and flashing the firmware
 
 The build runs in a container image with ESP-IDF.
@@ -41,6 +48,8 @@ docker run --rm -it -v ${PWD}:/workspaces/kybotos -w /workspaces/kybotos/src \
   bash -c "source /opt/esp-idf/export.sh && idf.py -p ${DEV} flash"
 ```
 
+- The commands above build the default board (Waveshare). For other boards use `scripts/fw.sh <board> build|flash|monitor`
+  (each board builds in `src/build-<board>/`, and a build for another board is never flashed; `docs/workflow.md` §3.2).
 - The versions of the managed components are pinned in `src/dependencies.lock`. Memory on the ESP32-S3 is tight,
   so upgrading them means re-taking the regression baselines (`docs/workflow.md` §3.2).
 - On first boot, the apps embedded in the firmware (metronome and mp3player) are copied to `/sdcard/apps` on the SD card and

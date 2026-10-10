@@ -23,6 +23,13 @@ Kybotos(キボトス)は、サンドボックス化された WASM アプリを�
 対象のハードウェアは **Waveshare ESP32-S3-Touch-LCD-2.8**(320×240 のタッチ液晶、I2S の音声出力、SD カード)に、
 MIDI の入出力(UART)をつないだものです。
 
+ボードはビルドのときに選びます(Phase 24)。
+
+| ボード | 名前(`KYBOTOS_BOARD`) | 状態 |
+|---|---|---|
+| Waveshare ESP32-S3-Touch-LCD-2.8 | `waveshare_lcd28`(既定) | すべての機能 |
+| Elecrow CrowPanel Advance 2.8"(V1.2) | `crowpanel_adv28` | 対応中: 画面・SD・シリアルのコマンド(ネイティブ USB の USB-C)。タッチ・音・MIDI は順に対応する(`docs/roadmap.md`) |
+
 ## ファームウェアのビルドと書き込み
 
 ESP-IDF の入ったコンテナイメージを使います。
@@ -39,6 +46,8 @@ docker run --rm -it -v ${PWD}:/workspaces/kybotos -w /workspaces/kybotos/src \
   bash -c "source /opt/esp-idf/export.sh && idf.py -p ${DEV} flash"
 ```
 
+- 上のコマンドは既定のボード(Waveshare)です。他のボードは `scripts/fw.sh <ボード> build|flash|monitor` を使います
+  (ボードごとに `src/build-<ボード>/` でビルドし、別のボード用のビルドは焼かない。`docs/workflow.md` §3.2)。
 - 使う部品(managed component)の版は `src/dependencies.lock` で固定しています。ESP32-S3 はメモリに余裕が少ないので、
   版を上げるときは回帰で基準値を取り直します(`docs/workflow.md` §3.2)。
 - 初回の起動で、ファームに埋め込んだアプリ(metronome と mp3player)が SD カードの `/sdcard/apps` に置かれ、ランチャーに並びます。

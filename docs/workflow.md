@@ -260,6 +260,31 @@ pgrep -af kybotos_host                          # 残留なしを確認(何も�
 ./scripts/hpane.sh waitfor esp32-monitor "app_main" 60000
 ```
 
+**ボードの指定(Phase 24)**: 上のコマンドは**既定のボード(Waveshare、`waveshare_lcd28`)**で、`src/build` と `src/sdkconfig` を使う。
+他のボード(`crowpanel_adv28` など。一覧は `scripts/fw.sh list`)は **`scripts/fw.sh`** を使う。ボードの名前から
+ビルドディレクトリ(既定のボード以外は `src/build-<board>/`、sdkconfig もその中)とポートを決め、docker の形は上と同じ。
+
+```bash
+./scripts/hpane.sh run esp32-build "<repo>/scripts/fw.sh <board> build" 1800000
+./scripts/hpane.sh run esp32-build "<repo>/scripts/fw.sh <board> flash" 300000
+./scripts/hpane.sh send esp32-monitor "<repo>/scripts/fw.sh <board> monitor <repo>/captures/<タスク名>/monitor.log"
+```
+
+- **ポートはボードごとに `KYBOTOS_PORT_<BOARD>`(大文字)で、`/dev/serial/by-id/...` を指定する。** USB Serial/JTAG のボードを
+  2 枚つなぐと `/dev/ttyACM0` / `1` の順番が挿す順で変わり、1 枚だけでも**どちらのボードも `/dev/ttyACM0` になる**
+  (by-id の名前には MAC が入る。値は各自の環境なので repo には書かない)。未設定なら `KYBOTOS_PORT` → `/dev/ttyACM0` で、警告を出す。
+- **`fw.sh flash` は、ビルドの sdkconfig のボードが指定と違えば止まる。** 焼いたあとは起動ログの最初の `APP: board: <board>` を見る。
+  **上の生のコマンドは常に既定のボードを焼く**ので、他のボードがつながっているときに使わない。
+- `KYBOTOS_DEV_APPS=1` / `0` を付けると `-DKYBOTOS_DEV_APPS=ON` / `OFF` を渡す(付けなければキャッシュの値のまま。§3.4)。
+- **同じビルドディレクトリでボードを変えない。** sdkconfig は「無いときだけ」defaults から作られるので、前のボードの設定が残る。
+  `src/CMakeLists.txt` が `sdkconfig is for board ...` で止める。
+- **ボードを足すとき**(`docs/architecture.md` 11-13):
+  1. `src/components/board/boards/<board>.h` にピンと機能(既存のボードの記述を写して直す。**ピンは回路図のネット名で確かめてから**出力にする)。
+  2. `src/main/Kconfig.projbuild` の choice `KYBOTOS_BOARD` と `KYBOTOS_BOARD_NAME` に 1 行ずつ、`board_pins.hpp` の include の分岐に 1 行。
+  3. `src/boards/<board>/sdkconfig.defaults`(choice を選ぶ行と、そのボードだけの設定)。
+  4. 新しい IC(タッチ、コーデックなど)があればドライバ。機能の無いボードでは `KB_*` を 0 にして、そのコードを動かさない。
+  5. 最初に焼く前に、元のファームを吸い出して残す(`esptool.py read_flash 0 ALL <file>`。repo には入れない)。
+
 長時間接続した `idf.py monitor` は `docker ps` 上 `Up` のままサイレントに
 詰まる(実機からの新規出力を転送しなくなる)ことがある。実機自体は動作を
 続けているため、`docker kill <container id>` で該当コンテナを落として
@@ -382,7 +407,11 @@ largest free block / WARN・ERROR / シナリオの合否を集計して Markdow
   ./scripts/device-regress.sh --task <タスク名> --conf <外の conf> \
       --mount <外の repo>:/workspaces/<名前> --build-dir /workspaces/<名前>/build/fw
   ```
-- 実機側の受け口は USB Serial/JTAG のコマンドコンソール(上の表)。
+- **ボードを指定するとき**(Phase 24): `--board <board>` で、`fw.sh` と同じ規則のビルドディレクトリ(モニタが読む ELF)と
+  ポート(`KYBOTOS_PORT_<BOARD>`)になる。既定のボードでも、他のボードがつながっている間は付ける
+  (`KYBOTOS_PORT_WAVESHARE_LCD28=<by-id> ./scripts/device-regress.sh --board waveshare_lcd28 --task <タスク名>`)。
+- 実機側の受け口は USB Serial/JTAG のコマンドコンソール(上の表)。CrowPanel はネイティブ USB 側の USB-C(基板の「USB1」)につなぐ
+  (CH340 側は UART0 なので、ログは出るがコマンドは受けない)。
   **タッチ・電源キーの既存操作系はそのまま使える**(注入中だけ実タッチを読まない)。
 - アプリ内 UI 操作はシナリオで自動化した(Phase 22)。**音・見た目の最終確認は §3.3 の人間の確認のまま。**
 - **手で起動したモニタが残ったまま走らせない。** スクリプトはポートを掴んだコンテナを kill してから

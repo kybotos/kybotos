@@ -1,7 +1,7 @@
 # Phase 24 実施記録: ボードをビルドで切り替える(CrowPanel Advance 2.8" への対応の第 1 段)
 
 - 指示書: `docs/prompts/phase24.md`
-- 状態: **ステップ 0 承認済み(2026-10-10)。ステップ 1 へ**
+- 状態: **完了(2026-10-10)**。次は Phase 24a(タッチ)
 
 ---
 
@@ -189,3 +189,105 @@ Waveshare のタッチの IO1〜4 = CrowPanel の無線の端子と SD の MISO�
    - **注意: CrowPanel も Waveshare と同じ `/dev/ttyACM0` になる。** 今の §3.2 のコマンドのまま焼くと、Waveshare 用のファームが CrowPanel に入る。
      e の by-id のポートと、f の 6(`fw.sh flash` のボードの一致の確認)を、ステップ 1 で先に入れる。
 3. **設計メモ(a〜f)、段階の計画(24 / 24a / 24b / 24c)、「Waveshare の水準」の定義を承認**。
+
+---
+
+## ステップ 1: 切り替えの枠組み(2026-10-10)
+
+0-d の a〜f のとおりに入れた(コミット `2658988`)。
+
+| 変更 | 内容 |
+|---|---|
+| `src/main/Kconfig.projbuild` | choice `KYBOTOS_BOARD`(`KYBOTOS_BOARD_WAVESHARE_LCD28` 既定 / `KYBOTOS_BOARD_CROWPANEL_ADV28`)と、名前の文字列 `KYBOTOS_BOARD_NAME` |
+| `src/boards/<board>/sdkconfig.defaults` | choice を選ぶ 1 行(CrowPanel はチップが同じなので、それ以外は共通の defaults のまま) |
+| `src/CMakeLists.txt` | `KYBOTOS_BOARD`(キャッシュ変数、既定 `waveshare_lcd28`)から `SDKCONFIG_DEFAULTS` を組む。`project()` の後で sdkconfig のボードと食い違えば `FATAL_ERROR` |
+| `src/components/board/boards/{waveshare_lcd28,crowpanel_adv28}.h` | ピンと機能(`KB_TOUCH_IC`、`KB_HAS_POWER_LATCH`、`PIN_AMP_EN` / `KB_AMP_EN_ON_LEVEL`、LCD の向きの 5 値、`PIN_SDMMC_*` の有無)。`board_pins.hpp` が `CONFIG_KYBOTOS_BOARD_*` で 1 つを include |
+| 散っていたピンを集めた | `touch.cpp` の自前の既定値、`audio.hpp` の I2S の既定値(`Mp3Player()` がボードのピンを使う)、`app_main.cpp` の電源キーの IO6 / 7 |
+| `touch.cpp` | `KB_TOUCH_IC_NONE` のボードは I2C を 0x08〜0x77 でスキャンしてログに出すだけ(RST / INT に触らない)。LVGL の入力デバイスは登録するので、注入(`tap`)は効く |
+| `audio.cpp` | `PIN_AMP_EN` があれば、起動時にアンプを**止めた状態**に置く(鳴らすのは 24b) |
+| `app_main.cpp` | 最初に `APP: board: <board>`。`KB_HAS_POWER_LATCH` が 0 のボードは電源キーのタスクとコールバックを作らない |
+| `scripts/fw.sh`(新規) | `fw.sh <board> build / flash / monitor / info`、`fw.sh list`。flash / monitor は sdkconfig のボードを確かめる。ポートは `KYBOTOS_PORT_<BOARD>`(by-id を `readlink -f` して docker に渡す) |
+| `scripts/device-regress.sh` | `--board <board>`(ビルドディレクトリとポート)。ポートを `readlink -f` |
+| `.gitignore` | `src/build-*/` |
+
+0-d の f の 5「`fw.sh` のボードの一覧」は要らなくなった(`fw.sh` は `src/boards/` を見る)。
+
+**気づいたこと**: 旧 `board_pins.hpp` の `static constexpr i2c_port_t I2C_TOUCH_PORT = I2C_NUM_0` は効いていなかった。
+`touch.cpp` は `#ifndef I2C_TOUCH_PORT`(マクロの有無)で見ていたので、`I2C_NUM_1` が使われていた。挙動を変えないよう、ボードの記述は `I2C_NUM_1` をマクロで書いた
+(回帰のログで `Touch online port=1 addr=0x1A`)。
+
+**確認**
+
+| 確認 | 結果 |
+|---|---|
+| Waveshare を §3.2 の**今までのコマンドのまま**ビルド | 通る(`Kybotos board: waveshare_lcd28`)。sdkconfig に `CONFIG_KYBOTOS_BOARD_WAVESHARE_LCD28=y` が足された。警告は今回触っていない 2 件(`midi.cpp` の `uart_config_t::flags`、esp-audio-player)だけ |
+| 食い違いの確認 | CrowPanel のビルドディレクトリに `-DKYBOTOS_BOARD=waveshare_lcd28` → `sdkconfig is for board 'crowpanel_adv28' but KYBOTOS_BOARD is 'waveshare_lcd28'` で止まる(戻して再構成し直した) |
+| **Waveshare の実機の回帰 3 本**(`fw.sh waveshare_lcd28` + `KYBOTOS_DEV_APPS=1` で焼き、`device-regress.sh --board waveshare_lcd28`。`captures/phase24-waveshare/report.md`) | **PASS**。開始時の free_int **150,232**、largest_int **98,304**、metronome の反復 3 回 +0、mp3player −472 / hostapi_check −176(`EXPECT_DELTA` どおり)、WARN / ERROR 0 件、metronome の highmark **25,744**。**Phase 23 と 1 バイトも同じ**。起動ログに `APP: board: waveshare_lcd28` |
+| この repo の外のビルド(sequencer を埋め込む側の、`-B` / `-DSDKCONFIG=` を自分で渡すスクリプト)を**変えずに**ビルド | 通る(既定の Waveshare として組まれ、その sdkconfig に `KYBOTOS_BOARD_NAME="waveshare_lcd28"`) |
+| Linux ホスト | 変更なし(ホスト側のコードに触れていない) |
+
+## ステップ 2: CrowPanel の起動(2026-10-10)
+
+`fw.sh crowpanel_adv28 build` → `flash`(`KYBOTOS_PORT_CROWPANEL_ADV28` に by-id)。起動ログ `captures/phase24/crowpanel-boot.log`:
+
+```
+octal_psram: vendor id : 0x0d (AP) / density : 0x03 (64 Mbit)
+esp_psram: Found 8MB PSRAM device / Speed: 80MHz / SPI SRAM memory test OK
+APP: board: crowpanel_adv28
+DISPLAY: lvgl draw buf: active 0x3c120998 (PSRAM) size 19200, cfg 19200 B x2
+TOUCH_CST328: I2C quick scan (port=1, 100kHz, 0x08-0x77):
+TOUCH_CST328:   - found addr 0x38 (responded to receive)
+W TOUCH_CST328: no touch driver for this board (SDA=15 SCL=16); touch injection only
+AUDIO/MP3: amplifier enable pin GPIO21: off
+APP: Audio_Init: free heap 225928 -> 179700 (delta 46228)
+APP: heap after seq init: free 176108, largest block 131072
+SDCARD: Using SPI host=2 MOSI=6 MISO=4 SCLK=5 CS=7      (SDHC、約 32GB)
+WASM/LAUNCH: menu: 3 app(s) listed
+KBCMD: ready
+```
+
+| 確認 | 結果 |
+|---|---|
+| 画面 | スプラッシュからメニューまで。**向きは Waveshare と同じ設定で正しい**(ユーザーが目で確認。色の反転・欠けの指摘なし)。LCD の向きの 5 値は Waveshare と同じ値のまま |
+| シリアルのコマンド窓口(ネイティブ USB) | `ping` → `pong`、`heap`、`ls`(sequencer / metronome / mp3player。カードは Waveshare で使っていたもの)、`texts` → `idle` |
+| アプリ | `run metronome` → `texts` で `Metronome` / `120bpm` / `4/4` / `flick up / down` → `tap 281 202` 2 回(再生 / 停止)→ `stop`。**停止時の free_int が開始時と同じ(155,448)**、metronome の highmark **25,744**(Waveshare と同じ) |
+| メモリ | メニューの状態で free_int **172,424** / largest_int 122,880(Waveshare は 150,232 / 98,304)。電源キーのタスクと CST328 の分などが無いぶん多い。アプリ実行中の free_int は 155,344 |
+| タッチ | **0x38 だけが応答した**(GT911 の 0x5D / 0x14 は応答なし)。工場出荷時のファームが GT911 のドライバで 0x5D を使っていたのとは違い、wiki とデータシートの **FT6336U(FT5x06 系、0x38)** と合う。24a は FT6336 として進める(チップ ID のレジスタで確かめる) |
+| SD | **指示書の段階の計画では 24b だが、回路図で確かめたピンでそのままマウントできた**(読み書きの検証と速度は 24b) |
+| 音 | I2S は CrowPanel のピンで動いている。アンプは止めたまま(音は出ない) |
+
+カメラの静止画は最初の 2 枚が全面黒(平均輝度 0。カメラが向いていなかった)。カメラを向け直して撮り直した:
+
+- `captures/phase24/cam_still_153604.png`: メニュー(`Kybotos Menu`、ヘッダ右の `Settings`、緑の行、`SD ready`)。向き・配色とも Waveshare と同じ。
+- `captures/phase24/cam_still_153632.png`: シリアルの `run metronome` で起動した metronome(ヘッダ `120bpm 4/4`、▶、巨大な `120` と `4/4`、拍の枠)。
+
+撮り直しのときの `ls` は 6 本(hostapi_check / midi_loopback / synth_probe を含む)で、最初の起動の 3 本から増えていた。
+CrowPanel に焼いたのは `KYBOTOS_DEV_APPS` を渡していない普段使いのファームで、検査用アプリを置くファーム(ON)は Waveshare にしか焼いていないので、
+**ユーザーは 1 枚の SD カードを 2 枚のボードで共用している**(Waveshare の回帰の後にカードを CrowPanel へ移した)。ファームは SD のアプリを消さないので、どちらのボードのランチャーにも、もう片方が置いたアプリが並ぶ(`.wasm` はボードによらないので、そのまま動く)。
+
+## ステップ 3: 文書(2026-10-10)
+
+- `README.md` / `README.ja.md`: ボードの表(名前と対応の状態)、既定以外のボードは `fw.sh`。
+- `docs/architecture.md` 11-13: ボードの切り替えの決定(選び方、ボードの記述、焼き間違いの防止、比べた別案)。
+- `docs/workflow.md` §3.2「ボードの指定」(`fw.sh`、`KYBOTOS_PORT_<BOARD>` に by-id、生のコマンドは常に既定のボード、ボードを足す手順)、
+  §3.4 `--board` と CrowPanel のつなぎ方(ネイティブ USB 側)。
+- `docs/lessons.md`: 2 件(下)。
+- `docs/roadmap.md`: 24 を done に、24a / 24b / 24c を planned で足した。
+
+## 完了条件の確認
+
+| 完了条件 | 結果 |
+|---|---|
+| 1. 調査、比較表、設計メモ、段階の計画(承認済み) | ✅ ステップ 0(0-a〜0-f) |
+| 2. ボードの名前の指定だけで両方をビルドできる。指定しないときは Waveshare | ✅ `fw.sh <board> build`。§3.2 の生のコマンドは Waveshare |
+| 3. Waveshare: 回帰 3 本 PASS、数値が Phase 23 と同じ、外のビルドが変えずに通る、Host API / ABI・`.wasm` 不変 | ✅ 1 バイトも同じ |
+| 4. CrowPanel: スプラッシュとメニュー(写真と起動ログ)、工場出荷時のファームの吸い出し | ✅ |
+| 5. ボードを足す手順 | ✅ workflow §3.2 |
+
+## 次の段(24a)への引き継ぎ
+
+- **タッチは 0x38 の FT6336U(FT5x06 系)**として書く(0x5D / 0x14 は応答なし)。チップ ID(FT6336 の 0xA3 など)を読んで確かめる。
+  INT=IO47、RST=IO48(回路図)。リセットで GPIO1 / 2 を叩くサンプルの手順(GT911 のアドレス選択)は要らない見込み。
+- 座標の向き: 液晶は Waveshare と同じ向きの設定で正しく出た。タッチの生の座標の向きと範囲は実機で合わせる(`map_basic_to_display` の回転)。
+- `KB_TOUCH_IC` に `KB_TOUCH_IC_FT6336` を足し、`touch.cpp` の CST328 の読み出しと並べる(LVGL の読み取り・注入・座標の変換は共通)。
+- CrowPanel の開始時の free_int は Waveshare より約 22KB 多い(172,424)。24b で回帰を回すときは、ボード別の基準値として記録する。

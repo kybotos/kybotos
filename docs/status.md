@@ -931,3 +931,12 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - 音は変えていない: 単体テスト `synth_voice_test`(切り出し前と 60 ケースのハッシュが一致、奪取の規則)、`synth_probe` の WAV の統計、ユーザーの耳。
   - 確認: 実機・Linux の回帰 3 本 PASS。Host API / ABI・`.wasm` は不変。開始時の free_int 150,232(−8 B)、highmark 不変。
   - 実機は普段使い(`KYBOTOS_DEV_APPS=OFF`)のファームに戻し、検査用アプリを消してある。
+
+## 2026-10-10 時点
+
+- **Phase 24(ボードをビルドで切り替える)完了。** 詳細は `docs/results/phase24.md`、決定は `docs/architecture.md` 11-13、手順は `docs/workflow.md` §3.2。
+  - 2 枚目のボード **Elecrow CrowPanel Advance 2.8"(V1.2)** に向けて、ボードをビルドのときに選べるようにした(`-DKYBOTOS_BOARD=<board>`、`scripts/fw.sh <board>`)。
+    既定は Waveshare で、今までのコマンドとビルドディレクトリのまま。
+  - Waveshare: 回帰 3 本 PASS、数値は Phase 23 と同じ(開始時の free_int 150,232)。
+  - CrowPanel: 画面・SD・シリアルのコマンド(ネイティブ USB 側の USB-C)が動く。タッチ(FT6336、24a)、音(24b)、MIDI(24c)はこれから。
+  - 実機: Waveshare は回帰用(`KYBOTOS_DEV_APPS=ON`)のファームのまま。CrowPanel は普段使い(OFF)のファーム。

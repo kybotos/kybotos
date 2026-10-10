@@ -774,6 +774,23 @@ L0 は `FIRE_ADVANCE_US = 20µs` 前にしか発火しないので、**先行時
 (b) MP3 と内蔵音を**同時に**鳴らしたくなったら決定 5 を見直す
 (I2S を 44.1kHz 固定にして MP3 をホストでアップサンプルし、ミキサへ合流させる)。
 
+### 11-13. ボードの切り替え — **Phase 24 で確定(2026-10-10)**
+
+実機のファームは、**ビルドのときにボードを 1 つ選ぶ**(Waveshare ESP32-S3-Touch-LCD-2.8 が既定、Elecrow CrowPanel Advance 2.8" V1.2)。
+
+- **選び方**: Kconfig の choice `KYBOTOS_BOARD`。CMake の `-DKYBOTOS_BOARD=<board>` が `src/boards/<board>/sdkconfig.defaults` を
+  共通の `sdkconfig.defaults` の後に足し、その断片が choice を選ぶ。sdkconfig は「無いときだけ」defaults から作られるので、
+  **ボードごとにビルドディレクトリと sdkconfig を分け**、食い違えば `src/CMakeLists.txt` が止める。
+  既定のボードは今までの `src/build` / `src/sdkconfig` のまま(既存のコマンドとこの repo の外のビルドは変わらない)。
+- **ボードの記述**: ピンと「持っている機能」(`KB_HAS_POWER_LATCH`、`KB_TOUCH_IC`、アンプの有効化のピン、LCD の向き、SDMMC の有無)を
+  **1 枚 1 ファイル**の `src/components/board/boards/<board>.h` に置き、`board_pins.hpp` が選ぶ。**コンパイル時に決め、実行時に判別しない**
+  (誤ったボードのピンを叩く前に判別する手段が無い)。違いはホストの中で吸収し、Host API / ABI と `.wasm` はボードによらない。
+- **焼き間違いの防止**: 起動ログの最初に `APP: board: <board>`。`scripts/fw.sh flash` は、ビルドの sdkconfig のボードが指定と違えば止める。
+  2 枚とも USB Serial/JTAG(`/dev/ttyACM*`)なので、ポートは `/dev/serial/by-id/...`(名前に MAC が入る)をボードごとの環境変数で持つ。
+- 比べた別案(`docs/results/phase24.md` 0-d): CMake の変数だけで `#define` を渡す(menuconfig から見えず、sdkconfig の他の値を
+  ボードで変える仕組みと二重になる)、Espressif の BSP(2 枚とも無く、LVGL などの版が lock から動く)、ボードごとの別プロジェクト(共有が面倒)。
+- ボードを足す手順は `docs/workflow.md` §3.2。
+
 ## 12. 数値の根拠表
 
 設計中のすべての定数と、その実測または計算根拠。
