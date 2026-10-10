@@ -28,6 +28,13 @@
 // Before Phase 24 board_pins.hpp declared a constexpr I2C_NUM_0 here, but touch.cpp
 // tests the name with #ifndef and fell back to I2C_NUM_1. Keep the value actually used.
 #define I2C_TOUCH_PORT I2C_NUM_1
+// Raw -> display: rotation (touch.cpp map_basic_to_display: 0=0, 1=90 CW, 2=180, 3=270 CW) and the initial
+// raw range for the range learning (moved from touch.cpp in Phase 24a, values unchanged)
+#define KB_TOUCH_ROT        1
+#define KB_TOUCH_CAL_XMIN   1
+#define KB_TOUCH_CAL_XMAX   239
+#define KB_TOUCH_CAL_YMIN   6
+#define KB_TOUCH_CAL_YMAX   298
 
 // ---- Audio (I2S std -> PCM5101 stereo DAC) ----
 #define PIN_I2S_BCLK   GPIO_NUM_48

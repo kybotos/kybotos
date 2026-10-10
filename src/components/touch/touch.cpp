@@ -19,10 +19,8 @@
 // KB_TOUCH_IC_NONE (Phase 24): no driver for the board's controller yet. The bus is scanned once and
 // logged; the LVGL input device is still registered so that touch injection (serial console) works.
 
-// ====== Rotation/mirroring disabled (BASIC) ======
-#ifndef TOUCH_ROT
-#define TOUCH_ROT 1
-#endif
+// ====== Rotation (board description, Phase 24a) ======
+#define TOUCH_ROT KB_TOUCH_ROT
 
 // ====== Logging control ======
 #define TOUCH_FORCE_POLL 1     // Always poll, ignore INT (get it working first)
@@ -51,7 +49,11 @@ static constexpr uint16_t REG_INFO_RES_Y        = 0xD1FA; // nominal Y max
 static constexpr uint16_t REG_DEBUG_INFO_MODE   = 0xD101;
 static constexpr uint16_t REG_NORMAL_MODE       = 0xD109;
 
+#if KB_TOUCH_IC == KB_TOUCH_IC_FT6336
+static const char* TAG = "TOUCH_FT6336";
+#else
 static const char* TAG = "TOUCH_CST328";
+#endif
 
 // I2C (new API)
 static i2c_master_bus_handle_t s_bus  = nullptr;
@@ -69,8 +71,8 @@ static uint16_t s_tp_ymax = 0;
 
 // === Auto-calibration (learn in raw space) =========================
 static bool     s_cal_inited = true;
-static uint16_t s_xmin = 1, s_xmax = 239;
-static uint16_t s_ymin = 6, s_ymax = 298;
+static uint16_t s_xmin = KB_TOUCH_CAL_XMIN, s_xmax = KB_TOUCH_CAL_XMAX;
+static uint16_t s_ymin = KB_TOUCH_CAL_YMIN, s_ymax = KB_TOUCH_CAL_YMAX;
 
 // Normalize raw -> nominal resolution (0..X_MAX-1 / 0..Y_MAX-1)
 static inline uint16_t normalize(uint16_t v, uint16_t vmin, uint16_t vmax, uint16_t out_max_minus1)
@@ -127,6 +129,51 @@ static inline void parse_xy_CST328_basic(const uint8_t* b, uint16_t& x_raw, uint
     y_raw = (static_cast<uint16_t>(b[2]) << 4) |  (b[3] & 0x0F);
 }
 
+#if KB_TOUCH_IC == KB_TOUCH_IC_FT6336
+//-----------------------------------------------------------------------------
+// FT6336 (Phase 24a): 8-bit registers. 0x02 TD_STATUS (number of points in bits 3:0),
+// 0x03..0x06 first point: 0x03 = event[7:6] (0 press, 1 lift, 2 contact) | X[11:8],
+// 0x04 = X[7:0], 0x05 = id[7:4] | Y[11:8], 0x06 = Y[7:0]. Raw points are portrait 240 x 320.
+//-----------------------------------------------------------------------------
+static constexpr uint8_t FT6336_ADDR        = 0x38;
+static constexpr uint8_t FT_REG_TD_STATUS   = 0x02;
+static constexpr uint8_t FT_REG_CHIP_ID     = 0xA3;
+static constexpr uint8_t FT_REG_FW_VER      = 0xA6;
+static constexpr uint8_t FT_REG_VENDOR_ID   = 0xA8;
+static constexpr uint8_t FT_EVENT_LIFT      = 1;
+
+static esp_err_t i2c_read8(uint8_t reg, uint8_t* rx, size_t len, uint32_t timeout_ms = 100)
+{
+    if (!s_dev) return ESP_FAIL;
+    return i2c_master_transmit_receive(s_dev, &reg, 1, rx, len, static_cast<int>(timeout_ms));
+}
+
+// Read 1 point -> return raw (only the first point is used, like the CST328)
+static bool read_raw_point(uint16_t& x_raw, uint16_t& y_raw, bool& pressed)
+{
+    uint8_t b[5] = {0};   // 0x02..0x06
+    if (i2c_read8(FT_REG_TD_STATUS, b, sizeof(b)) != ESP_OK) {
+        pressed = false;
+        return false;
+    }
+    const uint8_t cnt   = b[0] & 0x0F;
+    const uint8_t event = b[1] >> 6;
+    if (cnt == 0 || cnt > 2 || event == FT_EVENT_LIFT) {
+        pressed = false;
+#ifdef DEBUG_TOUCH_CURSOR
+        s_last_pressed = false;
+#endif
+        return true;   // read successfully but not pressed
+    }
+    x_raw = static_cast<uint16_t>(((b[1] & 0x0F) << 8) | b[2]);
+    y_raw = static_cast<uint16_t>(((b[3] & 0x0F) << 8) | b[4]);
+    pressed = true;
+#if TOUCH_LOG_TAP
+    ESP_LOGI(TAG, "RAW: cnt=%u ev=%u xr=%u yr=%u", cnt, event, x_raw, y_raw);
+#endif
+    return true;
+}
+#else
 //-----------------------------------------------------------------------------
 // Read 1 point (Number -> XY / fallback) -> return raw
 //-----------------------------------------------------------------------------
@@ -205,6 +252,7 @@ static bool read_raw_point(uint16_t& x_raw, uint16_t& y_raw, bool& pressed)
 #endif
     return true;
 }
+#endif  // KB_TOUCH_IC
 
 //-----------------------------------------------------------------------------
 // Update calibration (raw space)
@@ -473,6 +521,34 @@ void Touch::init(lv_display_t* disp)
     scan_addrs(100000, 0x08, 0x77);
     ESP_LOGW(TAG, "no touch driver for this board (SDA=%d SCL=%d); touch injection only",
              (int)PIN_TOUCH_SDA, (int)PIN_TOUCH_SCL);
+#elif KB_TOUCH_IC == KB_TOUCH_IC_FT6336
+    // FT6336 (Phase 24a): no reset, no INT (polled). It answers right after boot.
+    s_port = I2C_TOUCH_PORT;
+    ESP_ERROR_CHECK(create_bus(s_port));
+    scan_addrs(100000, 0x08, 0x77);
+    {
+        i2c_device_config_t dev_cfg{};
+        dev_cfg.device_address  = FT6336_ADDR;
+        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        dev_cfg.scl_speed_hz    = 100000;
+        i2c_master_dev_handle_t dev = nullptr;
+        ESP_ERROR_CHECK(i2c_master_bus_add_device(s_bus, &dev_cfg, &dev));
+        s_dev = dev;
+        uint8_t id = 0, fw = 0, ven = 0;
+        if (i2c_read8(FT_REG_CHIP_ID, &id, 1) == ESP_OK) {
+            (void)i2c_read8(FT_REG_FW_VER, &fw, 1);
+            (void)i2c_read8(FT_REG_VENDOR_ID, &ven, 1);
+            s_addr    = FT6336_ADDR;
+            s_tp_xmax = KB_TOUCH_RAW_W;
+            s_tp_ymax = KB_TOUCH_RAW_H;
+            ESP_LOGI(TAG, "Touch online port=%d addr=0x%02X chip_id=0x%02X%s fw=0x%02X vendor=0x%02X, X_MAX=%u, Y_MAX=%u",
+                     (int)s_port, s_addr, id, id == 0x64 ? "" : " (expected 0x64)", fw, ven, s_tp_xmax, s_tp_ymax);
+        } else {
+            (void)i2c_master_bus_rm_device(dev);
+            s_dev = nullptr;
+            ESP_LOGW(TAG, "FT6336 not responding at 0x%02X on port%d. Continue without touch.", FT6336_ADDR, (int)s_port);
+        }
+    }
 #else
     // ---- Initialize GPIO (RST/INT) ----
     if (PIN_TOUCH_INT != (gpio_num_t)-1) {
@@ -588,5 +664,7 @@ void Touch::init(lv_display_t* disp)
 
 #if KB_TOUCH_IC == KB_TOUCH_IC_CST328
     ESP_LOGI(TAG, "Touch initialized (CST328)");
+#elif KB_TOUCH_IC == KB_TOUCH_IC_FT6336
+    ESP_LOGI(TAG, "Touch initialized (FT6336)");
 #endif
 }

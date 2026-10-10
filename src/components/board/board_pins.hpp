@@ -12,6 +12,7 @@
 // Touch controller kinds for KB_TOUCH_IC
 #define KB_TOUCH_IC_NONE   0   // no driver yet: the bus is only scanned (touch injection still works)
 #define KB_TOUCH_IC_CST328 1
+#define KB_TOUCH_IC_FT6336 2   // FocalTech FT6336U (FT6x36), 0x38, 8-bit registers (Phase 24a)
 
 #if defined(CONFIG_KYBOTOS_BOARD_WAVESHARE_LCD28)
 #include "boards/waveshare_lcd28.h"

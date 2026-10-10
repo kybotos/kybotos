@@ -20,14 +20,23 @@
 #define KB_LVGL_MIRROR_X       true
 #define KB_LVGL_MIRROR_Y       false
 
-// ---- Touch (GT911 per the vendor examples, I2C shared with the J7 connector) ----
-// Phase 24 only scans the bus; the GT911 driver comes in Phase 24a.
-#define KB_TOUCH_IC    KB_TOUCH_IC_NONE
+// ---- Touch (FT6336U at 0x38, chip ID 0x64; I2C shared with the J7 connector). Phase 24a ----
+// The vendor examples use a GT911 driver, but only 0x38 answers on this board (docs/results/phase24a.md).
+// INT and RST are not used: the controller answers right after boot, and it is polled like the CST328.
+#define KB_TOUCH_IC    KB_TOUCH_IC_FT6336
 #define PIN_TOUCH_SDA  GPIO_NUM_15
 #define PIN_TOUCH_SCL  GPIO_NUM_16
-#define PIN_TOUCH_INT  GPIO_NUM_47  // schematic IO47_TP_INT
-#define PIN_TOUCH_RST  GPIO_NUM_48  // schematic IO48_TP_RST
+#define PIN_TOUCH_INT  GPIO_NUM_47  // schematic IO47_TP_INT (not used)
+#define PIN_TOUCH_RST  GPIO_NUM_48  // schematic IO48_TP_RST (not used)
 #define I2C_TOUCH_PORT I2C_NUM_1
+// Raw points are portrait 240 x 320; same rotation as the Waveshare CST328 (display x = raw y, display y = 239 - raw x)
+#define KB_TOUCH_RAW_W      240
+#define KB_TOUCH_RAW_H      320
+#define KB_TOUCH_ROT        1
+#define KB_TOUCH_CAL_XMIN   0
+#define KB_TOUCH_CAL_XMAX   239
+#define KB_TOUCH_CAL_YMIN   0
+#define KB_TOUCH_CAL_YMAX   319
 
 // ---- Audio (I2S std -> NS4168 mono class-D amplifier, right channel) ----
 #define PIN_I2S_BCLK   GPIO_NUM_13
