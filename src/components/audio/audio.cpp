@@ -569,30 +569,37 @@ bool Mp3Player::is_paused()  const noexcept {
 
 // ---- C API wrappers ----
 
-// Amplifier enable pin (boards with an amplifier after I2S, e.g. CrowPanel's NS4168. Phase 24).
-// Phase 24 keeps the amplifier off; turning it on (after I2S is running, against the pop) is Phase 24b.
-static void amp_init_off()
+// Amplifier enable pin (boards with an amplifier after I2S, e.g. CrowPanel's NS4168. Phase 24 / 24b).
+// The pin is driven to the off level before I2S starts and to the on level once I2S runs, then left on
+// (no pops or hiss were noticed with it always on; switching it per sound would risk pops. docs/results/phase24b.md).
+static void amp_set(bool on)
 {
     gpio_num_t pin = PIN_AMP_EN;  // not const: GPIO_NUM_NC would make the shift below a constant warning
     if (pin == GPIO_NUM_NC) return;
-    gpio_config_t io{};
-    io.mode = GPIO_MODE_OUTPUT;
-    io.pin_bit_mask = 1ULL << pin;
-    gpio_config(&io);
-    gpio_set_level(pin, KB_AMP_EN_ON_LEVEL ? 0 : 1);
-    ESP_LOGI(TAG, "amplifier enable pin GPIO%d: off", (int)pin);
+    if (!on) {
+        gpio_config_t io{};
+        io.mode = GPIO_MODE_OUTPUT;
+        io.pin_bit_mask = 1ULL << pin;
+        gpio_config(&io);
+    }
+    gpio_set_level(pin, on ? KB_AMP_EN_ON_LEVEL : !KB_AMP_EN_ON_LEVEL);
+    ESP_LOGI(TAG, "amplifier enable pin GPIO%d: %s", (int)pin, on ? "on" : "off");
 }
 
 extern "C" void Audio_Init(void) {
-    if (!g_player) { amp_init_off(); g_player = new Mp3Player(); }
+    const bool first = !g_player;
+    if (first) { amp_set(false); g_player = new Mp3Player(); }
     g_player->init(44100, 16, true);
+    if (first) amp_set(true);
 }
 
 extern "C" void Audio_Click_Init(void) {
-    if (!g_player) { amp_init_off(); g_player = new Mp3Player(); }
+    const bool first = !g_player;
+    if (first) { amp_set(false); g_player = new Mp3Player(); }
     if (!g_player->init_i2s_only(44100, 16, true)) {
         ESP_LOGE(TAG, "Audio_Click_Init: I2S init failed");
     }
+    if (first) amp_set(true);
 }
 
 extern "C" void Play_Click(void) {
