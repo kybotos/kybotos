@@ -790,6 +790,7 @@ L0 は `FIRE_ADVANCE_US = 20µs` 前にしか発火しないので、**先行時
 - 比べた別案(`docs/results/phase24.md` 0-d): CMake の変数だけで `#define` を渡す(menuconfig から見えず、sdkconfig の他の値を
   ボードで変える仕組みと二重になる)、Espressif の BSP(2 枚とも無く、LVGL などの版が lock から動く)、ボードごとの別プロジェクト(共有が面倒)。
 - ボードを足す手順は `docs/workflow.md` §3.2。
+- 両方のボードの GPIO の一覧(部品・ファームでの使い方・共用と切り替え・空きピン)は `docs/boards.md`。
 
 ## 12. 数値の根拠表
 
