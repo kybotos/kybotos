@@ -25,6 +25,10 @@
 #                             [--conf <path>] [--keep-monitor]
 #                             [--build-dir <コンテナ内のパス>] [--mount <ホスト>:<コンテナ>]
 #
+#   --board <board>(Phase 24)は、scripts/fw.sh と同じ規則でボードのビルドディレクトリ(既定のボード以外は
+#   src/build-<board>)とポート(KYBOTOS_PORT_<BOARD> があればそれ)を決める。--build-dir を併せて渡せばそちらが優先。
+#   ポートが /dev/serial/by-id/... のシンボリックリンクでもよい(docker には実体を渡す)。
+#
 #   --build-dir / --mount は、この repo の外のアプリを埋め込んだファーム(src/CMakeLists の
 #   KYBOTOS_EXTRA_APPS。別のビルドディレクトリでビルドする)を回すためのもの。モニタの
 #   idf.py に `-B` を、docker に `-v` を足す(--mount は複数回指定できる)。
@@ -44,6 +48,7 @@ HOLD_OVERRIDE_ARG=""
 KEEP_MONITOR=0
 IDF_BUILD_ARG=""
 EXTRA_MOUNTS=""
+BOARD=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -54,10 +59,19 @@ while [ $# -gt 0 ]; do
         --keep-monitor) KEEP_MONITOR=1; shift ;;
         --build-dir) IDF_BUILD_ARG="-B $2"; shift 2 ;;
         --mount) EXTRA_MOUNTS="$EXTRA_MOUNTS -v $2"; shift 2 ;;
-        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+        --board) BOARD="$2"; shift 2 ;;
+        -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+if [ -n "$BOARD" ]; then
+    [ -f "$REPO/src/boards/$BOARD/sdkconfig.defaults" ] || { echo "unknown board: $BOARD" >&2; exit 2; }
+    if [ -z "$IDF_BUILD_ARG" ] && [ "$BOARD" != waveshare_lcd28 ]; then IDF_BUILD_ARG="-B build-$BOARD"; fi
+    PORT_VAR="KYBOTOS_PORT_$(echo "$BOARD" | tr 'a-z' 'A-Z')"
+    [ -n "${!PORT_VAR:-}" ] && PORT="${!PORT_VAR}"
+fi
+PORT="$(readlink -f "$PORT")"
 
 # shellcheck source=device-regress.conf
 . "$CONF" || { echo "cannot read conf: $CONF" >&2; exit 2; }

@@ -1,5 +1,26 @@
 menu "Kybotos"
 
+    choice KYBOTOS_BOARD
+        prompt "Target board"
+        default KYBOTOS_BOARD_WAVESHARE_LCD28
+        help
+            The board the firmware is built for (Phase 24). Pins and features come from
+            src/components/board/boards/<board>.h. Do not change this in menuconfig: pass
+            -DKYBOTOS_BOARD=<board> (or use scripts/fw.sh), which applies
+            src/boards/<board>/sdkconfig.defaults. Each board needs its own build directory
+            and sdkconfig; src/CMakeLists.txt stops when they disagree.
+
+        config KYBOTOS_BOARD_WAVESHARE_LCD28
+            bool "Waveshare ESP32-S3-Touch-LCD-2.8"
+        config KYBOTOS_BOARD_CROWPANEL_ADV28
+            bool "Elecrow CrowPanel Advance 2.8\" (V1.2)"
+    endchoice
+
+    config KYBOTOS_BOARD_NAME
+        string
+        default "waveshare_lcd28" if KYBOTOS_BOARD_WAVESHARE_LCD28
+        default "crowpanel_adv28" if KYBOTOS_BOARD_CROWPANEL_ADV28
+
     config KYBOTOS_WASM_CYCLE_TEST
         bool "Run app start/stop cycle test at boot (leak check)"
         default n

@@ -19,6 +19,7 @@
 #include "launcher.hpp"
 #include "screensaver.hpp"
 #include "serial_cmd.hpp"
+#include "board_pins.hpp"
 
 static const char* TAG = "APP";
 
@@ -31,9 +32,13 @@ extern "C" void app_main()
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
+    // 焼き間違いに気づけるよう、最初にボードの名前を出す(Phase 24)
+    ESP_LOGI(TAG, "board: %s", CONFIG_KYBOTOS_BOARD_NAME);
+
+#if KB_HAS_POWER_LATCH
     PowerKey::Config cfg;
-    cfg.key_pin = GPIO_NUM_6;
-    cfg.latch_pin = GPIO_NUM_7;
+    cfg.key_pin = PIN_PWR_KEY_IN;
+    cfg.latch_pin = PIN_PWR_LATCH;
     cfg.hold_ms = 2000;          // Power off on 2-second long press
     cfg.poll_period_ms = 10;     // Poll every 10 ms
     cfg.use_deepsleep_hold = true;
@@ -41,6 +46,7 @@ extern "C" void app_main()
     static PowerKey pwr{cfg};
     pwr.init();
     pwr.start_task();
+#endif
 
     ESP_LOGI(TAG, "Boot: WASM launcher");
     static Display disp;
@@ -87,6 +93,8 @@ extern "C" void app_main()
     // 停止する(app_key を持たない既存アプリは即終了のまま)。
     // コールバックは power_key タスク(小スタック)上なので atomic 操作のみ。
     // 消灯中の短押しは「復帰」も兼ねる(要求フラグを立てるだけ。LVGL には触らない)
+    // 電源キーの無いボード(KB_HAS_POWER_LATCH 0)では、戻る / ホームはシリアルの key だけ(Phase 24。ボタンの割り当ては 24c)
+#if KB_HAS_POWER_LATCH
     pwr.set_on_short_press([](void*) {
         wasmrt::screensaver_request_wake();
         wasmrt::app_request_key_back();
@@ -99,6 +107,7 @@ extern "C" void app_main()
         wasmrt::screensaver_request_wake();
         wasmrt::app_request_force_home();
     }, nullptr);
+#endif
 
     // SD 準備+メニュー表示は FATFS 用に十分なスタックを持つタスクで行う
     auto boot_task = [](void*) {

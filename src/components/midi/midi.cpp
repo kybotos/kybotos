@@ -137,7 +137,7 @@ void Midi_Init()
         // MIDI は TX 側のみ論理反転信号(Phase 8a で確認済み)。RX 側は
         // TLP2361 がトーテムポール出力かつ反転型で、MIDI のカレントループ
         // 論理(アイドル = 無電流 = 出力 H)がそのまま UART の論理レベルに
-        // 一致するため UART_SIGNAL_RXD_INV は付けない(board_pins.hpp 参照、
+        // 一致するため UART_SIGNAL_RXD_INV は付けない(boards/waveshare_lcd28.h 参照、
         // Phase 8c で実機検証済み)。
         err = uart_set_line_inverse(kMidiUart, UART_SIGNAL_TXD_INV);
     }

@@ -117,7 +117,7 @@ void Display::init() {
     esp_lcd_panel_reset(panel_handle);
     esp_lcd_panel_init(panel_handle);
     esp_lcd_panel_invert_color(panel_handle, true); // ST7789 characteristic
-    esp_lcd_panel_mirror(panel_handle, false, true); // adjust orientation
+    esp_lcd_panel_mirror(panel_handle, KB_LCD_PANEL_MIRROR_X, KB_LCD_PANEL_MIRROR_Y); // orientation (board)
     esp_lcd_panel_disp_on_off(panel_handle, true);
 
     // Connect LVGL via esp_lvgl_port
@@ -138,9 +138,9 @@ void Display::init() {
     disp_cfg.double_buffer = true;
     disp_cfg.monochrome    = false;
     disp_cfg.rotation = {
-      .swap_xy  = true,
-      .mirror_x = true,
-      .mirror_y = false,
+      .swap_xy  = KB_LVGL_SWAP_XY,    // orientation (board)
+      .mirror_x = KB_LVGL_MIRROR_X,
+      .mirror_y = KB_LVGL_MIRROR_Y,
     };
     disp_cfg.color_format  = LV_COLOR_FORMAT_RGB565;
 

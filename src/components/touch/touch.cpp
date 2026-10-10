@@ -15,22 +15,9 @@
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 
-// ====== Board-dependent pins (can build even if undefined) ======
-#ifndef PIN_TOUCH_SDA
-#define PIN_TOUCH_SDA GPIO_NUM_1
-#endif
-#ifndef PIN_TOUCH_SCL
-#define PIN_TOUCH_SCL GPIO_NUM_3
-#endif
-#ifndef PIN_TOUCH_INT
-#define PIN_TOUCH_INT GPIO_NUM_4   // If unconnected, use ((gpio_num_t)-1)
-#endif
-#ifndef PIN_TOUCH_RST
-#define PIN_TOUCH_RST GPIO_NUM_2   // If unconnected, use ((gpio_num_t)-1)
-#endif
-#ifndef I2C_TOUCH_PORT
-#define I2C_TOUCH_PORT I2C_NUM_1
-#endif
+// ====== Board-dependent pins: PIN_TOUCH_SDA/SCL/INT/RST, I2C_TOUCH_PORT, KB_TOUCH_IC (board_pins.hpp) ======
+// KB_TOUCH_IC_NONE (Phase 24): no driver for the board's controller yet. The bus is scanned once and
+// logged; the LVGL input device is still registered so that touch injection (serial console) works.
 
 // ====== Rotation/mirroring disabled (BASIC) ======
 #ifndef TOUCH_ROT
@@ -413,7 +400,7 @@ static esp_err_t create_bus(i2c_port_t port)
 //-----------------------------------------------------------------------------
 // Add device at the specified address and check communication (100 kHz)
 //-----------------------------------------------------------------------------
-static esp_err_t attach_device(uint8_t addr, int scl_hz)
+[[maybe_unused]] static esp_err_t attach_device(uint8_t addr, int scl_hz)  // unused on KB_TOUCH_IC_NONE boards
 {
     i2c_device_config_t dev_cfg{};
     dev_cfg.device_address  = addr;
@@ -448,12 +435,12 @@ static esp_err_t attach_device(uint8_t addr, int scl_hz)
 }
 
 //-----------------------------------------------------------------------------
-// Quick scan 0x10-0x1F (for debugging)
+// Quick scan lo..hi (for debugging; CST328 uses 0x10-0x1F)
 //-----------------------------------------------------------------------------
-static void scan_addrs(int scl_hz)
+static void scan_addrs(int scl_hz, uint8_t lo = 0x10, uint8_t hi = 0x1F)
 {
-    ESP_LOGI(TAG, "I2C quick scan (port=%d, %dkHz):", (int)s_port, scl_hz/1000);
-    for (uint8_t a = 0x10; a <= 0x1F; ++a) {
+    ESP_LOGI(TAG, "I2C quick scan (port=%d, %dkHz, 0x%02X-0x%02X):", (int)s_port, scl_hz/1000, lo, hi);
+    for (uint8_t a = lo; a <= hi; ++a) {
         i2c_device_config_t dev_cfg{};
         dev_cfg.device_address  = a;
         dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
@@ -479,6 +466,14 @@ void Touch::init(lv_display_t* disp)
     s_hres = lv_display_get_horizontal_resolution(disp);
     s_vres = lv_display_get_vertical_resolution(disp);
 
+#if KB_TOUCH_IC == KB_TOUCH_IC_NONE
+    // No driver for this board's controller yet (Phase 24): leave RST/INT alone and scan the bus
+    s_port = I2C_TOUCH_PORT;
+    ESP_ERROR_CHECK(create_bus(s_port));
+    scan_addrs(100000, 0x08, 0x77);
+    ESP_LOGW(TAG, "no touch driver for this board (SDA=%d SCL=%d); touch injection only",
+             (int)PIN_TOUCH_SDA, (int)PIN_TOUCH_SCL);
+#else
     // ---- Initialize GPIO (RST/INT) ----
     if (PIN_TOUCH_INT != (gpio_num_t)-1) {
         gpio_config_t io_int{};
@@ -535,6 +530,7 @@ void Touch::init(lv_display_t* disp)
         cst328_enter_normal_mode();
         vTaskDelay(pdMS_TO_TICKS(10)); // wait for Normal mode
     }
+#endif
 
     // ---- Register LVGL input device (once) ----
     lvgl_port_lock(0);
@@ -590,5 +586,7 @@ void Touch::init(lv_display_t* disp)
 #endif
     lvgl_port_unlock();
 
+#if KB_TOUCH_IC == KB_TOUCH_IC_CST328
     ESP_LOGI(TAG, "Touch initialized (CST328)");
+#endif
 }

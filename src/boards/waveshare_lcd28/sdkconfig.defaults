@@ -1,0 +1,2 @@
+# Board: Waveshare ESP32-S3-Touch-LCD-2.8 (default). Applied after src/sdkconfig.defaults (Phase 24).
+CONFIG_KYBOTOS_BOARD_WAVESHARE_LCD28=y

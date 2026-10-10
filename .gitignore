@@ -1,6 +1,7 @@
 .cache/
 src/build/
 src/build-dev/
+src/build-*/
 src/managed_components/
 src/sdkconfig.old
 src/sdkconfig

@@ -25,18 +25,19 @@ namespace audio {
 class Mp3Player {
 public:
     struct Pins {
-        // I2S pin mapping (defaults based on the provided PCM5101 example)
-        gpio_num_t bclk = GPIO_NUM_48;  // SCLK/BCLK
-        gpio_num_t ws   = GPIO_NUM_38;  // L/RCLK (LRCK/WS)
-        gpio_num_t dout = GPIO_NUM_47;  // SDOUT to DAC
-        gpio_num_t mclk = GPIO_NUM_NC;  // Not used by PCM5101 in many cases
+        // I2S pin mapping. The default constructor takes them from the board description
+        // (board_pins.hpp, Phase 24)
+        gpio_num_t bclk = GPIO_NUM_NC;  // SCLK/BCLK
+        gpio_num_t ws   = GPIO_NUM_NC;  // L/RCLK (LRCK/WS)
+        gpio_num_t dout = GPIO_NUM_NC;  // SDOUT to DAC / amplifier
+        gpio_num_t mclk = GPIO_NUM_NC;  // Not used
         gpio_num_t din  = GPIO_NUM_NC;  // Not used (no RX)
     };
 
     /// マスター音量の既定値(Phase 21b)。**両ホストで同じ値にすること**
     static constexpr uint8_t kDefaultVolume = 50;
 
-    Mp3Player() noexcept;                  // uses default pins
+    Mp3Player() noexcept;                  // uses the board pins
     explicit Mp3Player(const Pins& pins) noexcept;
     ~Mp3Player();
 

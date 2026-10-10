@@ -3,6 +3,7 @@
 #include "clock_authority.hpp"
 #include "boot_sound.h"      // Phase 22a 追記: 起動音
 #include "synth_voice.h"     // Phase 23: 内蔵音源のボイス(両ホスト共有)
+#include "board_pins.hpp"
 #include "esp_log.h"
 #include "driver/i2s_std.h"
 #include <cstring>
@@ -48,7 +49,8 @@ uint8_t Audio_Volume = Mp3Player::kDefaultVolume; // Phase 21b
 bool    Music_Next_Flag = false;
 }
 
-Mp3Player::Mp3Player() noexcept : pins_(Pins{}) {}
+Mp3Player::Mp3Player() noexcept
+    : pins_(Pins{PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT, GPIO_NUM_NC, GPIO_NUM_NC}) {}
 Mp3Player::Mp3Player(const Pins& pins) noexcept : pins_(pins) {}
 
 Mp3Player::~Mp3Player() {
@@ -567,13 +569,27 @@ bool Mp3Player::is_paused()  const noexcept {
 
 // ---- C API wrappers ----
 
+// Amplifier enable pin (boards with an amplifier after I2S, e.g. CrowPanel's NS4168. Phase 24).
+// Phase 24 keeps the amplifier off; turning it on (after I2S is running, against the pop) is Phase 24b.
+static void amp_init_off()
+{
+    gpio_num_t pin = PIN_AMP_EN;  // not const: GPIO_NUM_NC would make the shift below a constant warning
+    if (pin == GPIO_NUM_NC) return;
+    gpio_config_t io{};
+    io.mode = GPIO_MODE_OUTPUT;
+    io.pin_bit_mask = 1ULL << pin;
+    gpio_config(&io);
+    gpio_set_level(pin, KB_AMP_EN_ON_LEVEL ? 0 : 1);
+    ESP_LOGI(TAG, "amplifier enable pin GPIO%d: off", (int)pin);
+}
+
 extern "C" void Audio_Init(void) {
-    if (!g_player) g_player = new Mp3Player();
+    if (!g_player) { amp_init_off(); g_player = new Mp3Player(); }
     g_player->init(44100, 16, true);
 }
 
 extern "C" void Audio_Click_Init(void) {
-    if (!g_player) g_player = new Mp3Player();
+    if (!g_player) { amp_init_off(); g_player = new Mp3Player(); }
     if (!g_player->init_i2s_only(44100, 16, true)) {
         ESP_LOGE(TAG, "Audio_Click_Init: I2S init failed");
     }
