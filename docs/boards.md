@@ -8,7 +8,7 @@
 
 ピン配置を見直すときや、外付けの回路(MIDI IN / OUT、電源スイッチ、戻る / ホームのボタン)を設計するときの出発点にする。
 
-- 時点: 2026-10-10(Phase 24b の終わり。CrowPanel のホームキーを含む)。
+- 時点: 2026-11-02(Phase 24c の終わり。CrowPanel のホームキーと MIDI を含む)。
 - **ファームの原本は `src/components/board/boards/<board>.h`**。この文書と食い違ったら、そちらが正しい。ピンを変えたら、この文書も直す。
 - ボードの切り替えのしくみは `docs/architecture.md` 11-13、調査の経緯は `docs/results/phase24.md`(0-b、0-c)/ `phase24a.md` / `phase24b.md`。
 
@@ -138,8 +138,8 @@ USB-C 2 つ(CH340K → UART0 と、ネイティブ USB の「USB1」)、拡張�
 | 14 | TFT_PWR | 未使用(**触らない**) | 部品に NC の注記。LOW にしない |
 | 15 | I2C SDA(タッチ、J7、J8) | **使用** | 4.7kΩ プルアップ。I2C_NUM_1 |
 | 16 | I2C SCL(タッチ、J7、J8) | **使用** | |
-| 17 | J6 UART1 TX | **使用**(MIDI OUT) | 3.3V。**まだ何もつないでいない** |
-| 18 | J6 UART1 RX | **使用**(MIDI IN) | 3.3V。**まだ何もつないでいない** |
+| 17 | J6 UART1 TX | **使用**(MIDI OUT) | 3.3V。Waveshare と同じ自作の MIDI 回路をつないで動作を確認(Phase 24c) |
+| 18 | J6 UART1 RX | **使用**(MIDI IN) | 3.3V。同上 |
 | 19 / 20 | ネイティブ USB D− / D+(USB1) | **使用** | USB Serial/JTAG |
 | 21 | NS_CTRL(アンプの電源の制御) | **使用** | **LOW = 動作**。起動時は HIGH(off)にしてから、I2S を始めたあとに LOW |
 | 38 | LCD バックライト(NPN 経由) | **使用** | HIGH で点灯、PWM 可 |

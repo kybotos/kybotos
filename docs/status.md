@@ -949,3 +949,10 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - mp3player の一覧の縦スワイプ(曲が足りない)と Waveshare の実機の回帰(`audio.cpp.obj` は一致)は 24c へ持ち越し。
   - 実機: CrowPanel は普段使いのファーム、共用の SD の検査用アプリは消した。Waveshare は 24a の終わりのファームのまま。
   - 追記: CrowPanel に**ホームキー**(IO1 と GND の間の押しボタン)を足した。短押し = 戻る、長めの押し = 強制ホーム(ラッチが無いので電源は切れない)。
+
+## 2026-11-02 時点
+
+- **Phase 24c(CrowPanel の MIDI)完了。** 詳細は `docs/results/phase24c.md`。
+  - Waveshare と同じ自作の MIDI 回路を CrowPanel の J6(UART1、TX 17 / RX 18)につないだ。**ソフトの変更なし**で、IN(Note On / Off・ランニングステータス・SysEx 302 バイト)も OUT(START / Clock / STOP)も動く。
+  - mp3player の一覧の縦スワイプと Waveshare の実機の回帰は、処理せずに 24d へ持ち越し。
+  - 実機: CrowPanel は普段使いのファーム、共用の SD の検査用アプリは消した。Waveshare は 24a の終わりのファームのまま。
