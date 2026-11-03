@@ -956,3 +956,12 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - Waveshare と同じ自作の MIDI 回路を CrowPanel の J6(UART1、TX 17 / RX 18)につないだ。**ソフトの変更なし**で、IN(Note On / Off・ランニングステータス・SysEx 302 バイト)も OUT(START / Clock / STOP)も動く。
   - mp3player の一覧の縦スワイプと Waveshare の実機の回帰は、処理せずに 24d へ持ち越し。
   - 実機: CrowPanel は普段使いのファーム、共用の SD の検査用アプリは消した。Waveshare は 24a の終わりのファームのまま。
+
+## 2026-11-03 時点
+
+- **Phase 24d(CrowPanel 対応の残りの確認)完了。** 詳細は `docs/results/phase24d.md`。**ソフトの変更なし**。
+  - CrowPanel で mp3player の一覧(10 曲)を縦にスワイプして最後まで送れる(注入と指で確認)。
+  - Waveshare の実機の回帰は PASS、数値は Phase 24a と同じ。ホームキーの分岐は Waveshare で何もしない。
+  - これで CrowPanel は Waveshare の水準(電源断・バッテリーを除く)。Phase 24 は完了。
+  - `scripts/hpane.sh` を herdr 0.9.5 の `herdr pane wait-output` に合わせた(それまで `run` / `waitfor` は必ずタイムアウトしていた)。
+  - 実機: 両ボードとも普段使いのファーム、共用の SD の検査用アプリは消した(検査用の MP3 `swipe-test-01〜06` は残っている)。
