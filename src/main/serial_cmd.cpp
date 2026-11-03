@@ -33,6 +33,8 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 
+#include "battery.hpp"
+#include "board_pins.hpp"
 #include "hostapi.hpp"
 #include "launcher.hpp"
 #include "touch.hpp"
@@ -232,6 +234,18 @@ void cmd_rm(const char* name)
     ESP_LOGI(TAG, "rm ok %s", path);
 }
 
+// Phase 25: battery voltage and charge estimate (boards with KB_HAS_BATT_SENSE only)
+void cmd_batt()
+{
+#if KB_HAS_BATT_SENSE
+    battery::Reading r;
+    if (!battery::Get(&r)) { ESP_LOGI(TAG, "batt err no sample yet"); return; }
+    ESP_LOGI(TAG, "batt mv=%d pct=%d", r.mv, r.pct);
+#else
+    ESP_LOGI(TAG, "batt err not supported");
+#endif
+}
+
 void dispatch(char* line)
 {
     // 前後の空白を落とす
@@ -258,6 +272,7 @@ void dispatch(char* line)
     else if (strcmp(line, "key") == 0)  cmd_key(arg);
     else if (strcmp(line, "texts") == 0) cmd_texts();
     else if (strcmp(line, "rm") == 0)   cmd_rm(arg);
+    else if (strcmp(line, "batt") == 0) cmd_batt();
     else ESP_LOGI(TAG, "err unknown command '%s'", line);
 }
 

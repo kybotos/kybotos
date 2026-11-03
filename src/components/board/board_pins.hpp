@@ -31,6 +31,15 @@
 #define PIN_PWR_LATCH GPIO_NUM_NC
 #endif
 
+// Battery voltage sensing (Phase 25). A board with a resistor divider from the battery to an ADC pin sets
+// KB_HAS_BATT_SENSE 1, PIN_BAT_ADC and KB_BAT_DIV_MUL (battery voltage = ADC voltage x KB_BAT_DIV_MUL).
+#ifndef KB_HAS_BATT_SENSE
+#define KB_HAS_BATT_SENSE 0
+#endif
+#if KB_HAS_BATT_SENSE && !defined(KB_BAT_DIV_MUL)
+#error "KB_HAS_BATT_SENSE 1 needs PIN_BAT_ADC and KB_BAT_DIV_MUL in the board description"
+#endif
+
 #ifndef KB_AMP_EN_ON_LEVEL
 #define KB_AMP_EN_ON_LEVEL 1
 #endif

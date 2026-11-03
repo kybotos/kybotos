@@ -47,6 +47,13 @@
 #define PIN_PWR_KEY_IN     GPIO_NUM_6
 #define PIN_PWR_LATCH      GPIO_NUM_7
 
+// ---- Battery voltage sensing (Phase 25) ----
+// GPIO8 = BAT_ADC (schematic net): the battery through a 200k / 100k divider (ADC voltage = battery / 3).
+// Checked against a meter: calibrated ADC mV x 3 agrees within 0.4% (no extra correction factor).
+#define KB_HAS_BATT_SENSE  1
+#define PIN_BAT_ADC        GPIO_NUM_8
+#define KB_BAT_DIV_MUL     3
+
 // ---- MIDI (UART1, own circuit; Phase 8a / 8c) ----
 // OUT: 2SC1815 transistor drive, 31250bps 8N1, TXD inverted (uart_set_line_inverse is required).
 // IN: TLP2361 photocoupler (totem-pole, inverting): the idle current-loop state already reads as

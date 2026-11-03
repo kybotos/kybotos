@@ -50,6 +50,7 @@
 // but there is no self-hold latch, so the long press does not power off.
 #define KB_HAS_POWER_KEY   1
 #define KB_HAS_POWER_LATCH 0
+#define KB_HAS_BATT_SENSE  0   // no battery sensing yet (Phase 25: Waveshare only)
 #define PIN_PWR_KEY_IN     GPIO_NUM_1
 
 // ---- MIDI (UART1 on the J6 3.3V-UART1 connector; circuit to be wired in Phase 24c) ----

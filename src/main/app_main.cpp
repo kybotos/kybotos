@@ -12,6 +12,7 @@
 #include "touch.hpp"
 #include "audio.hpp"
 #include "midi.hpp"
+#include "battery.hpp"
 #include "clock_authority.hpp"
 #include "seq.hpp"
 #include "wasm_runtime.hpp"
@@ -47,6 +48,8 @@ extern "C" void app_main()
     pwr.init();
     pwr.start_task();
 #endif
+
+    battery::Init();   // Phase 25: no-op on boards without battery sensing
 
     ESP_LOGI(TAG, "Boot: WASM launcher");
     static Display disp;
