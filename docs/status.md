@@ -977,4 +977,4 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - 画面の右上に残量(%)を常に出す(メニューもアプリの中も)。電池で動いているときは普通の文字、USB 給電は白抜き、20% 以下は赤。スクリーンセーバー・消灯の間は消える。
   - Settings / metronome / mp3player のヘッダ右を左へ寄せた(`.wasm` を再ビルド)。Linux ホストは `KYBOTOS_SIM_BATT` の模擬値。
   - Waveshare の回帰 3 本 PASS(free_int −8B。`MIN_FREE_INT` との余裕は 452B)。非公開の app-sequencer のヘッダ右は重なる(追従が要る)。
-  - 次は 25b(低電池の警告と安全な停止)。
+  - 25b・25c は実施せず、roadmap の U-36 / U-37 として管理する(ユーザー判断)。CrowPanel で 25a のファームの起動と操作を確認済み(バッジは出ない)。

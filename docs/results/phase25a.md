@@ -73,3 +73,13 @@ Waveshare を普段使い(`KYBOTOS_DEV_APPS=0`)のファームに焼き直し、
 - **`MIN_FREE_INT` との余裕は 452B。** 25b で何か足すなら、先に基準の更新を相談する。
 - メニューの題名と `Settings` は y=8、アプリのヘッダは y=5、バッジは y=5 に統一した。メニューでは `Settings` の方が 3px 低く並ぶ(見た目の差。気になれば直す)。
 - **非公開の app-sequencer のヘッダ右は未追従**(重なる)。
+
+## 追記 (2026-11-03): CrowPanel の実機の確認と、25b / 25c の扱い
+
+- **25b・25c は実施しない**(ユーザー判断: 優先度が低い)。roadmap の未割当の課題 U-36(電池が少ないときの動き)/ U-37(アプリへ出す Host API)として管理する。上の「25b への引き継ぎ」はそのまま U-36 の前提になる。
+- **CrowPanel の確認**: 25a のコードでビルドして焼いた(`captures/phase25a/crowpanel-boot.log`、git の対象外)。`APP: board: crowpanel_adv28`、タッチ FT6336 が初期化、`batt` は `err not supported`、WARN / ERROR なし。
+  起動の途中の値は Phase 25 の CrowPanel と −8B(Audio_Init 後 free 220,708 / seq init 後 170,884 / WASM ready 170,676)で、Waveshare の差と同じ。
+  SD を CrowPanel に差し替えて、ユーザーが実機で確認した: メニューの右上に何も出ず、metronome / mp3player が開いて操作でき、戻る / ホームも効き、見た目の崩れなし(OK)。
+- CrowPanel の回帰 3 本は回していない(電池まわりは何も動かさず、起動値が一致し、操作はユーザーが確認したため)。
+- 焼く前に、Waveshare 用の `fw.sh monitor` が `/dev/ttyACM0` を握っていて esptool が「chip stopped responding」で失敗した(2 枚とも ttyACM0。別のボードに焼く前にモニタを止める)。
+
