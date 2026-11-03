@@ -183,7 +183,7 @@ case "$CMD" in
     TOKEN="HPANE_$(date +%s)_$$"        # 毎回一意 → 過去ログへの誤マッチを防ぐ
     # 送信文字列側は '' で分断し、コマンドエコー行に完全形が現れないようにする
     herdr pane run "$PANE" "$USER_CMD; echo ${TOKEN}''_EXIT=\$?"
-    if ! herdr wait output "$PANE" --match "${TOKEN}_EXIT=" --timeout "$TIMEOUT_MS"; then
+    if ! herdr pane wait-output "$PANE" --match "${TOKEN}_EXIT=" --timeout "$TIMEOUT_MS" >/dev/null; then
         echo "hpane: TIMEOUT (${TIMEOUT_MS}ms) waiting for '$NAME'. Last output:" >&2
         herdr pane read "$PANE" --source recent-unwrapped --lines 40 >&2
         exit 124
@@ -211,7 +211,7 @@ case "$CMD" in
     [ $# -ge 1 ] || usage
     MATCH="$1"; TIMEOUT_MS="${2:-60000}"
     PANE=$(ensure_pane "$NAME")
-    herdr wait output "$PANE" --match "$MATCH" --timeout "$TIMEOUT_MS"
+    herdr pane wait-output "$PANE" --match "$MATCH" --timeout "$TIMEOUT_MS"
     ;;
 
   read)
