@@ -375,6 +375,7 @@ largest free block / WARN・ERROR / シナリオの合否を集計して Markdow
 | `key back` / `key home` | 電源キーの短押し / 長押しと同じ |
 | `texts` | アプリ画面の文字スロットを `text X Y RRGGBB <文字>` で列挙(非 ASCII は `\xNN`)、最後に `texts done N` |
 | `rm <app>` | SD の `/sdcard/apps/<app>.wasm` を消す(実行中は不可) |
+| `batt` | 電池電圧(mV)と残量(%)(`KBCMD: batt mv=... pct=...`)。電池の検知が無いボードは `batt err not supported`(Phase 25) |
 
 - 対象アプリ・保持秒数・許容警告パターン・アプリごとの許容 heap 差分・下限しきい値
   (`MIN_FREE_INT` / `MIN_LARGEST_INT` / `MIN_FREE_PSRAM`。Phase 15 で「固定値一致」から改訂)・

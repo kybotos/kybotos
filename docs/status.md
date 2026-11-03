@@ -965,3 +965,10 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - これで CrowPanel は Waveshare の水準(電源断・バッテリーを除く)。Phase 24 は完了。
   - `scripts/hpane.sh` を herdr 0.9.5 の `herdr pane wait-output` に合わせた(それまで `run` / `waitfor` は必ずタイムアウトしていた)。
   - 実機: 両ボードとも普段使いのファーム、共用の SD の検査用アプリは消した(検査用の MP3 `swipe-test-01〜06` は残っている)。
+
+- **Phase 25(Waveshare のバッテリー電圧の検知)完了。** 詳細は `docs/results/phase25.md`。Host API / ABI・`.wasm` は不変。
+  - GPIO8 = `BAT_ADC`(200kΩ / 100kΩ の分圧)。校正した ADC の mV × 3 が電池電圧で、テスターと 0.4% 以内で一致。シリアルの `batt` で `mv` と `pct` が読める。
+  - **電池なしは電圧で判定できない**(USB のみ・電池なしで 4.19〜4.20V。USB 給電中は電池より約 50mV 高い)。残量は電池で動いているときの値が本来のもの。
+  - Waveshare の回帰 3 本 PASS。電池のタスクで free_int が −3,124B(`MIN_FREE_INT` との余裕は 460B)。CrowPanel は電池のコードを動かさず、起動の値が 24c と一致。
+  - 次は 25a(残量の表示)。USB 給電中の扱いは着手時に決める。
+
