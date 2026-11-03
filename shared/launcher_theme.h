@@ -21,8 +21,9 @@
 #define MENU_TITLE_Y     8
 #define MENU_RULE_Y      28 /* 題名の下の線(高さ 2) */
 #define MENU_RULE_H      2
-#define MENU_SETTINGS_RIGHT 310 /* Settings の文字の右端 */
-#define MENU_SETTINGS_HIT_X 220 /* Settings の当たり判定: x 220〜320、y 0〜MENU_RULE_Y */
+#define MENU_SETTINGS_RIGHT 270 /* Settings の文字の右端(Phase 25a: 右上の電池のバッジ shared/battery_badge.h の予約 x 276〜 を避けて 310 から左へ) */
+#define MENU_SETTINGS_HIT_X 196 /* Settings の当たり判定: x 196〜274、y 0〜MENU_RULE_Y */
+#define MENU_SETTINGS_HIT_X1 274
 #define MENU_ROW_X       10
 #define MENU_ROW_W       300
 #define MENU_ROW_Y0      38 /* 1 行目のアプリ */

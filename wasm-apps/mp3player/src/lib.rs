@@ -79,7 +79,7 @@ const BAR_W: i32 = 4;
 const BAR_H: i32 = ROWS as i32 * ROW_H - ROW_GAP;
 const BAR_MIN: i32 = 12;
 // ヘッダ右の曲の番号 `2/12`(右端をそろえる)
-const NUM_RIGHT: i32 = 312;
+const NUM_RIGHT: i32 = 270; // Phase 25a: 右上の電池のバッジ(予約 x 276〜)を避けた(旧 312)
 // 曲が無いとき
 const EMPTY_Y: i32 = 136;
 

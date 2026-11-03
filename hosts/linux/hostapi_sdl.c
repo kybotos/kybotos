@@ -33,6 +33,7 @@
 #include "boot_sound.h"  /* Phase 22a 追記: 起動音(両ホスト共有)*/
 #include "synth_voice.h" /* Phase 23: 内蔵音源のボイス(両ホスト共有)*/
 #include "hostapi_midi.h"
+#include "battery_badge.h" /* Phase 25a: 右上の電池のバッジ(両ホスト共有。Linux は模擬値) */
 #include "hostapi_seq.h"
 
 /* 実機と同じランドスケープ 320x240 */
@@ -1065,6 +1066,34 @@ static int text_width(const char* s)
     return (int)strlen(s) * 8;
 }
 
+/* 電池の残量のバッジ(Phase 25a)。Linux ホストには電池が無いので、環境変数 KYBOTOS_SIM_BATT の模擬値を出す:
+ * `<0..100>` = 電池で動いている、`usb<0..100>` = USB 給電(白抜き)。未設定なら出さない。
+ * 形と配色は shared/battery_badge.h(実機の battery_badge.cpp と同じ)。マスター設定の帯より下に描く */
+static void draw_battery_badge(void)
+{
+    static int s_init = 0, s_pct = -1, s_usb = 0;
+    if (!s_init) {
+        s_init = 1;
+        const char* e = getenv("KYBOTOS_SIM_BATT");
+        if (e && *e) {
+            if (strncmp(e, "usb", 3) == 0) { s_usb = 1; e += 3; }
+            s_pct = atoi(e);
+        }
+    }
+    if (s_pct < 0) return;
+    char buf[8];
+    battery_badge_text(buf, sizeof(buf), s_pct);
+    const uint32_t accent = (s_pct <= BADGE_LOW_PCT) ? BADGE_RGB_LOW : BADGE_RGB_TEXT;
+    const int w = text_width(buf);
+    if (s_usb) {
+        const int x0 = BADGE_RIGHT - w - BADGE_BOX_PAD_L;
+        host_sdl_rect(x0, BADGE_BOX_Y, 320 - x0, BADGE_BOX_H, accent);
+        draw_string(BADGE_RIGHT - w, BADGE_TEXT_Y, buf, BADGE_RGB_INV_TEXT);
+    } else {
+        draw_string(BADGE_RIGHT - w, BADGE_TEXT_Y, buf, accent);
+    }
+}
+
 /* マスター設定のオーバーレイ(Phase 21b、Phase 22e で作り直した)。
  * **アプリのスロットを 1 つも使わず**、描画のいちばん最後に上から重ねる。
  * 形・座標・配色・当たり判定は shared/master_ui.h(両ホストで同じ) */
@@ -1117,7 +1146,7 @@ static void draw_master_overlay(void)
     host_sdl_rect(MASTERUI_HANDLE_X, MASTERUI_HANDLE_Y, MASTERUI_HANDLE_W, MASTERUI_HANDLE_H, MASTERUI_RGB_HINT);
 }
 
-void draw_master_overlay_if_open(void) { draw_master_overlay(); }
+void draw_master_overlay_if_open(void) { draw_battery_badge(); draw_master_overlay(); }
 
 void host_sdl_render(void)
 {
@@ -1139,6 +1168,7 @@ void host_sdl_render(void)
         draw_string(t->x, t->y, t->text, t->rgb888);
     }
 
+    draw_battery_badge();  /* Phase 25a */
     draw_master_overlay(); /* アプリより上。Phase 21b */
 
     SDL_RenderPresent(s_renderer);

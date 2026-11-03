@@ -143,15 +143,15 @@ void create_menu_locked()
     lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
 
     // ヘッダ右の `Settings`(Phase 21b は一覧の先頭の行、Phase 22d でヘッダ右へ)。上端スワイプが使えない場面の受け皿。
-    // 当たり判定は文字より広く、ヘッダの右(x MENU_SETTINGS_HIT_X〜320、y 0〜MENU_RULE_Y)
+    // 当たり判定は文字より広く、ヘッダの右(x MENU_SETTINGS_HIT_X〜MENU_SETTINGS_HIT_X1、y 0〜MENU_RULE_Y)
     lv_obj_t* settings = lv_obj_create(s_menu_screen);
     lv_obj_remove_style_all(settings);
-    lv_obj_set_size(settings, 320 - MENU_SETTINGS_HIT_X, MENU_RULE_Y);
+    lv_obj_set_size(settings, MENU_SETTINGS_HIT_X1 - MENU_SETTINGS_HIT_X, MENU_RULE_Y);
     lv_obj_set_pos(settings, MENU_SETTINGS_HIT_X, 0);
     lv_obj_add_flag(settings, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t* settings_lbl = lv_label_create(settings);
     lv_label_set_text(settings_lbl, "Settings");
-    lv_obj_align(settings_lbl, LV_ALIGN_TOP_RIGHT, -(320 - MENU_SETTINGS_RIGHT), MENU_TITLE_Y);
+    lv_obj_align(settings_lbl, LV_ALIGN_TOP_RIGHT, -(MENU_SETTINGS_HIT_X1 - MENU_SETTINGS_RIGHT), MENU_TITLE_Y);
     // 文字色は親に付けて継承させる(押している間はクリーム)
     lv_obj_set_style_text_color(settings, lv_color_hex(MENU_SETTINGS_TEXT_RGB888), 0);
     lv_obj_set_style_text_color(settings, lv_color_hex(MENU_SETTINGS_HI_RGB888), LV_STATE_PRESSED);

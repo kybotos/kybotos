@@ -59,7 +59,7 @@ configure_file("${_gen}.tmp" "${_gen}" COPYONLY)
 endif()
 
 idf_component_register(
-    SRCS "wasm_runtime.cpp" "hostapi.cpp" "launcher.cpp" "screensaver.cpp"
+    SRCS "wasm_runtime.cpp" "hostapi.cpp" "launcher.cpp" "screensaver.cpp" "battery_badge.cpp"
          "${_gen}"
          "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/master_ui.c"
          "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/splash_logo.c"
@@ -70,6 +70,6 @@ idf_component_register(
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/tune_down.mp3"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/tune_duo.mp3"
     PRIV_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared"
-    PRIV_REQUIRES esp_timer audio midi seq storage display
+    PRIV_REQUIRES esp_timer audio midi seq storage display battery board esp_lvgl_port
 )
 target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>)

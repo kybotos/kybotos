@@ -27,6 +27,11 @@ void Init();
 // Lock-free; safe to call from any task.
 bool Get(Reading* out);
 
+// Whether the board booted on external (USB) power rather than the battery (the power key was not pressed at boot).
+// Set once at boot by app_main; the display shows a different look for it (Phase 25a). Default: false (battery).
+void SetExternalPower(bool ext);
+bool ExternalPower();
+
 // Battery voltage (mV) -> charge estimate (%). Piecewise linear, clamped to 0..100. Pure function.
 int PercentFromMv(int mv);
 

@@ -1,6 +1,7 @@
 // screensaver.cpp — メニュー表示中のスクリーンセーバー / バックライト消灯。
 // 設計意図と外部仕様は screensaver.hpp を参照。
 #include "screensaver.hpp"
+#include "battery_badge.hpp"
 
 #include "sdkconfig.h"
 
@@ -104,6 +105,7 @@ void enter_saver_locked()
     start_drift_locked(s_dot, w - kDotSize, h - kDotSize);
 
     s_state = State::Saver;
+    wasmrt::battery_badge_suppress(true);   // 減光中はバッジを消す(Phase 25a)
     ESP_LOGI(TAG, "screensaver on (idle %u s)", (unsigned)(kSaverMs / 1000));
 }
 
@@ -129,6 +131,7 @@ void wake_locked()
     if (!display_backlight_is_on()) display_backlight_set(true);
     if (s_state != State::Active) ESP_LOGI(TAG, "wake");
     s_state = State::Active;
+    wasmrt::battery_badge_suppress(false);
     lv_display_trigger_activity(nullptr);
 }
 

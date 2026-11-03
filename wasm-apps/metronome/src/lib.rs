@@ -104,8 +104,9 @@ const BEAT_ON: u32 = appui::theme::LEAF; // 拍の枠(点灯): 若葉
 const BEAT_ACCENT: u32 = 0xf0_a0_40; // 1 拍目: 橙(ステップ 0 の D6)
 
 // ヘッダ右は `120bpm 4/4`(本体と同じ並び: BPM が左、拍子が右)
-const HDR_BPM_X: i32 = 200;
-const HDR_MET_X: i32 = 268;
+// Phase 25a: 右上の電池のバッジ(予約 x 276〜)を避けて左へ寄せた(旧 200 / 268)
+const HDR_BPM_X: i32 = 186;
+const HDR_MET_X: i32 = 246;
 const PLAY_Y: i32 = STA_TEXT_Y; // ▶ / ■(当たり判定はステータス行の右 80px。D13)
 const HINT_Y: i32 = STA_TEXT_Y; // 停止中だけ出す手引き(D8)
 // ヘッダの `120bpm` のドラッグも BPM のシャトル(D3)

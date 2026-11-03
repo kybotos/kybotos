@@ -503,6 +503,8 @@ min/mean/max・ヒストグラム・外れ値・見かけ BPM の分布・0xFA/0
 
 ### 3.6 Linux ホストの画面キャプチャ(Phase 18 で追加)
 
+(電池の残量のバッジ(Phase 25a)の見た目は `scripts/badge-shots-linux.sh <タスク名>` で撮る。`KYBOTOS_SIM_BATT` の模擬値を変えてメニュー / アプリを撮る。)
+
 **x11grab は使わない。** 画面全体(ルートウィンドウ)を読むため、この環境(Wayland + XWayland /
 GNOME)では常に黒くなる。**ウィンドウ ID を指定して読めば取れる**(静止画は ImageMagick の
 `import -window`、録画は `xwd -id` の連続取得)。対象ウィンドウは **`kybotos_host` の pid と

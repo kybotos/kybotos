@@ -38,7 +38,7 @@
 /* メニューレイアウト(320x240 論理座標)。形と配色は shared/launcher_theme.h(実機と共有。Phase 22d) */
 /* ヘッダ右の `Settings`(Phase 21b は一覧のいちばん上の行、Phase 22d でヘッダ右へ)。アプリの index とは別物 */
 #define MENU_SETTINGS_ROW (-2)
-#define MENU_SETTINGS_X 254 /* DejaVu 13pt の `Settings`(約 54px)の右端を MENU_SETTINGS_RIGHT にそろえる */
+#define MENU_SETTINGS_X 216 /* DejaVu 13pt の `Settings`(約 54px)の右端を MENU_SETTINGS_RIGHT にそろえる */
 
 #define SPLASH_MIN_MS 1500 /* 起動時のスプラッシュの表示時間(Phase 22a。実機と同じ最短時間) */
 
@@ -293,7 +293,7 @@ static void menu_render(int hover)
 
 static int menu_hit_test(int lx, int ly)
 {
-    if (ly >= 0 && ly < MENU_RULE_Y) return (lx >= MENU_SETTINGS_HIT_X) ? MENU_SETTINGS_ROW : -1;
+    if (ly >= 0 && ly < MENU_RULE_Y) return (lx >= MENU_SETTINGS_HIT_X && lx < MENU_SETTINGS_HIT_X1) ? MENU_SETTINGS_ROW : -1;
     if (lx < MENU_ROW_X || lx >= MENU_ROW_X + MENU_ROW_W) return -1;
     for (int i = 0; i < s_app_count; i++) {
         const int y = MENU_ROW_Y0 + i * (MENU_ROW_H + MENU_ROW_GAP);

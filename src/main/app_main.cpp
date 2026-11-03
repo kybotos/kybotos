@@ -13,6 +13,7 @@
 #include "audio.hpp"
 #include "midi.hpp"
 #include "battery.hpp"
+#include "battery_badge.hpp"
 #include "clock_authority.hpp"
 #include "seq.hpp"
 #include "wasm_runtime.hpp"
@@ -47,6 +48,7 @@ extern "C" void app_main()
     static PowerKey pwr{cfg};
     pwr.init();
     pwr.start_task();
+    battery::SetExternalPower(!pwr.is_battery_mode());   // Phase 25a: the badge looks different on USB power
 #endif
 
     battery::Init();   // Phase 25: no-op on boards without battery sensing
@@ -57,6 +59,7 @@ extern "C" void app_main()
     disp.start_lvgl();
     static Touch touch;
     touch.init(disp.lvgl_get_disp());
+    wasmrt::battery_badge_init();   // Phase 25a: battery level at the top right (no-op without battery sensing)
     // 起動時のスプラッシュ(Phase 22a)。以降の初期化と SD の準備の間、ロゴを出しておく
     wasmrt::launcher_show_splash();
 

@@ -972,3 +972,9 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - Waveshare の回帰 3 本 PASS。電池のタスクで free_int が −3,124B(`MIN_FREE_INT` との余裕は 460B)。CrowPanel は電池のコードを動かさず、起動の値が 24c と一致。
   - 次は 25a(残量の表示)。USB 給電中の扱いは着手時に決める。
 
+
+- **Phase 25a(バッテリー残量の表示)完了。** 詳細は `docs/results/phase25a.md`。Host API / ABI は不変。
+  - 画面の右上に残量(%)を常に出す(メニューもアプリの中も)。電池で動いているときは普通の文字、USB 給電は白抜き、20% 以下は赤。スクリーンセーバー・消灯の間は消える。
+  - Settings / metronome / mp3player のヘッダ右を左へ寄せた(`.wasm` を再ビルド)。Linux ホストは `KYBOTOS_SIM_BATT` の模擬値。
+  - Waveshare の回帰 3 本 PASS(free_int −8B。`MIN_FREE_INT` との余裕は 452B)。非公開の app-sequencer のヘッダ右は重なる(追従が要る)。
+  - 次は 25b(低電池の警告と安全な停止)。

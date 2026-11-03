@@ -1,8 +1,8 @@
 #include "battery.hpp"
 #include "board_pins.hpp"
 
-#if KB_HAS_BATT_SENSE
 #include <atomic>
+#if KB_HAS_BATT_SENSE
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -14,6 +14,7 @@
 namespace battery {
 
 namespace {
+std::atomic<bool> s_external_power{false};
 // Provisional single-cell LiPo discharge table (mV, %), highest first.
 struct Pt { int mv; int pct; };
 constexpr Pt kCurve[] = {
@@ -22,6 +23,9 @@ constexpr Pt kCurve[] = {
 };
 constexpr int kCurveN = (int)(sizeof(kCurve) / sizeof(kCurve[0]));
 }  // namespace
+
+void SetExternalPower(bool ext) { s_external_power.store(ext, std::memory_order_relaxed); }
+bool ExternalPower() { return s_external_power.load(std::memory_order_relaxed); }
 
 int PercentFromMv(int mv)
 {
