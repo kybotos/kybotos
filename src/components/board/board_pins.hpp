@@ -42,11 +42,27 @@
 
 // Battery voltage sensing (Phase 25). A board with a resistor divider from the battery to an ADC pin sets
 // KB_HAS_BATT_SENSE 1, PIN_BAT_ADC and KB_BAT_DIV_MUL (battery voltage = ADC voltage x KB_BAT_DIV_MUL).
+// Phase 26a: KB_BATT_SRC says where the value comes from. KB_BATT_SRC_ADC (default) is the divider above;
+// KB_BATT_SRC_FUEL_GAUGE is a MAX17048 fuel gauge at KB_FG_I2C_ADDR on the touch I2C bus (CrowPanel + I/O board).
+#define KB_BATT_SRC_ADC        1
+#define KB_BATT_SRC_FUEL_GAUGE 2
 #ifndef KB_HAS_BATT_SENSE
 #define KB_HAS_BATT_SENSE 0
 #endif
-#if KB_HAS_BATT_SENSE && !defined(KB_BAT_DIV_MUL)
+#ifndef KB_BATT_SRC
+#define KB_BATT_SRC KB_BATT_SRC_ADC
+#endif
+#if KB_HAS_BATT_SENSE && KB_BATT_SRC == KB_BATT_SRC_ADC && !defined(KB_BAT_DIV_MUL)
 #error "KB_HAS_BATT_SENSE 1 needs PIN_BAT_ADC and KB_BAT_DIV_MUL in the board description"
+#endif
+#if KB_HAS_BATT_SENSE && KB_BATT_SRC == KB_BATT_SRC_FUEL_GAUGE && !defined(KB_FG_I2C_ADDR)
+#error "KB_BATT_SRC_FUEL_GAUGE needs KB_FG_I2C_ADDR in the board description"
+#endif
+
+// Phase 26a: before the touch I2C bus is created, clock SCL (up to 9 times) and send a STOP if SDA is held low.
+// For boards with a device on that bus that keeps running across an ESP32 reset (the battery-powered fuel gauge).
+#ifndef KB_I2C_BUS_RECOVER
+#define KB_I2C_BUS_RECOVER 0
 #endif
 
 #ifndef KB_AMP_EN_ON_LEVEL

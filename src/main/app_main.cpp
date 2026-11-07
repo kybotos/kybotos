@@ -62,6 +62,9 @@ extern "C" void app_main()
     disp.start_lvgl();
     static Touch touch;
     touch.init(disp.lvgl_get_disp());
+#if KB_HAS_BATT_SENSE && KB_BATT_SRC == KB_BATT_SRC_FUEL_GAUGE
+    battery::AttachI2cBus(touch_i2c_bus());   // Phase 26a: the I/O board's fuel gauge shares the touch bus
+#endif
     wasmrt::battery_badge_init();   // Phase 25a: battery level at the top right (no-op without battery sensing)
     // 起動時のスプラッシュ(Phase 22a)。以降の初期化と SD の準備の間、ロゴを出しておく
     wasmrt::launcher_show_splash();

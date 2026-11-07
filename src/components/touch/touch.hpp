@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "lvgl.h"
+#include "driver/i2c_master.h"
 
 class Touch {
 public:
@@ -17,3 +18,8 @@ namespace touch_inject {
 void press(int16_t x, int16_t y);  // 押す。押したまま呼べば移動
 void release();                    // 離す(最後に press した座標で)
 } // namespace touch_inject
+
+// Phase 26a: the I2C bus the touch driver created (I2C_TOUCH_PORT), so that other devices on the same bus
+// (the I/O board's fuel gauge) can be added with i2c_master_bus_add_device(). nullptr before Touch::init().
+// The ESP-IDF master driver serialises transactions between devices on one bus.
+i2c_master_bus_handle_t touch_i2c_bus();

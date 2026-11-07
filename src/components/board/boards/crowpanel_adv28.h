@@ -55,9 +55,16 @@
 #define KB_HAS_POWER_KEY   1
 #define KB_HAS_POWER_LATCH 1
 #define KB_PWR_HOLD_ALWAYS 1
-#define KB_HAS_BATT_SENSE  0   // no battery sensing yet (the I/O board's fuel gauge: later phase)
 #define PIN_PWR_KEY_IN     GPIO_NUM_1
 #define PIN_PWR_LATCH      GPIO_NUM_2
+
+// ---- Battery: MAX17048 fuel gauge on the I/O board (I2C 0x36, same bus as the touch). Phase 26a ----
+// Powered from the battery side, so it keeps running across an ESP32 reset (hence the bus recovery at boot).
+// It answers and reports a plausible voltage even with no battery (it then sees the charger output).
+#define KB_HAS_BATT_SENSE  1
+#define KB_BATT_SRC        KB_BATT_SRC_FUEL_GAUGE
+#define KB_FG_I2C_ADDR     0x36
+#define KB_I2C_BUS_RECOVER 1
 
 // ---- MIDI (UART1 on the J6 3.3V-UART1 connector; circuit to be wired in Phase 24c) ----
 #define PIN_MIDI_TX    GPIO_NUM_17

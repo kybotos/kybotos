@@ -240,7 +240,16 @@ void cmd_batt()
 #if KB_HAS_BATT_SENSE
     battery::Reading r;
     if (!battery::Get(&r)) { ESP_LOGI(TAG, "batt err no sample yet"); return; }
+#if KB_BATT_SRC == KB_BATT_SRC_FUEL_GAUGE
+    battery::GaugeReading g{};
+    (void)battery::GetGauge(&g);
+    const int ca = g.crate_x10 < 0 ? -g.crate_x10 : g.crate_x10;
+    ESP_LOGI(TAG, "batt mv=%d pct=%d src=fg soc=%d.%d crate=%s%d.%d table_pct=%d ext=%d", r.mv, r.pct,
+             g.soc_x10 / 10, g.soc_x10 % 10, g.crate_x10 < 0 ? "-" : "+", ca / 10, ca % 10,
+             g.table_pct, battery::ExternalPower() ? 1 : 0);
+#else
     ESP_LOGI(TAG, "batt mv=%d pct=%d", r.mv, r.pct);
+#endif
 #else
     ESP_LOGI(TAG, "batt err not supported");
 #endif

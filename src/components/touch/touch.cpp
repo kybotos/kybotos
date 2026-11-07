@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "esp_rom_sys.h"
 
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
@@ -427,10 +428,47 @@ static void indev_read_cb(lv_indev_t* indev, lv_indev_data_t* data)
 //-----------------------------------------------------------------------------
 // Create I2C bus
 //-----------------------------------------------------------------------------
+#if KB_I2C_BUS_RECOVER
+// Phase 26a: a device that kept running across the ESP32 reset (the fuel gauge) may still hold SDA low in
+// the middle of a read. Clock SCL until it lets go (at most 9 bits), then send a STOP. Open-drain, ~100 kHz.
+static void recover_bus()
+{
+    const gpio_num_t sda = (gpio_num_t)PIN_TOUCH_SDA;
+    const gpio_num_t scl = (gpio_num_t)PIN_TOUCH_SCL;
+    gpio_config_t io{};
+    io.pin_bit_mask = (1ULL << sda) | (1ULL << scl);
+    io.mode         = GPIO_MODE_INPUT_OUTPUT_OD;
+    io.pull_up_en   = GPIO_PULLUP_ENABLE;
+    gpio_config(&io);
+    gpio_set_level(sda, 1);
+    gpio_set_level(scl, 1);
+    esp_rom_delay_us(10);
+    if (gpio_get_level(sda)) { gpio_reset_pin(sda); gpio_reset_pin(scl); return; }   // bus idle: nothing to do
+    int clocks = 0;
+    while (!gpio_get_level(sda) && clocks < 9) {
+        gpio_set_level(scl, 0); esp_rom_delay_us(5);
+        gpio_set_level(scl, 1); esp_rom_delay_us(5);
+        clocks++;
+    }
+    // STOP: SDA low -> high while SCL is high
+    gpio_set_level(scl, 0); esp_rom_delay_us(5);
+    gpio_set_level(sda, 0); esp_rom_delay_us(5);
+    gpio_set_level(scl, 1); esp_rom_delay_us(5);
+    gpio_set_level(sda, 1); esp_rom_delay_us(5);
+    const int released = gpio_get_level(sda);
+    gpio_reset_pin(sda);
+    gpio_reset_pin(scl);
+    ESP_LOGW(TAG, "I2C bus recovery: SDA was held low, %d clock(s), %s", clocks, released ? "released" : "STILL LOW");
+}
+#endif
+
 static esp_err_t create_bus(i2c_port_t port)
 {
     if (s_dev) { i2c_master_bus_rm_device(s_dev); s_dev = nullptr; }
     if (s_bus) { i2c_del_master_bus(s_bus); s_bus = nullptr; }
+#if KB_I2C_BUS_RECOVER
+    recover_bus();
+#endif
 
     i2c_master_bus_config_t bus_cfg{};
     bus_cfg.i2c_port          = port;
@@ -668,3 +706,6 @@ void Touch::init(lv_display_t* disp)
     ESP_LOGI(TAG, "Touch initialized (FT6336)");
 #endif
 }
+
+// Phase 26a: the touch I2C bus, for other devices on it (the fuel gauge). nullptr before Touch::init.
+i2c_master_bus_handle_t touch_i2c_bus() { return s_bus; }
