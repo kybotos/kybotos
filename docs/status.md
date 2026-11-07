@@ -989,3 +989,7 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - 回帰は両ボードで 3 本 PASS。Waveshare の動きは不変(free_int −24B、`MIN_FREE_INT` との余裕 428B)。
   - 後の段: 26a 残量計 / 26b ペダル / 26c 外付けの DAC(順番は未定)。
   - 実機: 両ボードとも普段使いのファーム、共用の SD の検査用アプリは消した(SD は CrowPanel に挿してある)。
+- **Phase 26a(CrowPanel の残量計)完了。** 詳細は `docs/results/phase26a.md`。Host API / ABI・`.wasm` は不変。
+  - I/O 基板の MAX17048 から電池の電圧と残量を読み、右上のバッジとシリアルの `batt` に出す(Waveshare は ADC のまま)。USB 給電の見え方は充放電の向き(CRATE)で切り替える。
+  - 回帰は両ボードで 3 本 PASS(CrowPanel free_int 149,156、Waveshare 147,076 は前と同じ)。
+  - 実機: 両ボードとも普段使いのファーム。**Waveshare に別の SD を用意した**(初回の起動でファームが metronome / mp3player と MP3 を置いた。sequencer は入っていない)。どちらの SD も検査用アプリは消してある。
