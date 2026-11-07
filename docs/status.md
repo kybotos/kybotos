@@ -978,3 +978,13 @@ CLAUDE.md から独立して更新する(CLAUDE.md 本体は書き換えない)�
   - Settings / metronome / mp3player のヘッダ右を左へ寄せた(`.wasm` を再ビルド)。Linux ホストは `KYBOTOS_SIM_BATT` の模擬値。
   - Waveshare の回帰 3 本 PASS(free_int −8B。`MIN_FREE_INT` との余裕は 452B)。非公開の app-sequencer のヘッダ右は重なる(追従が要る)。
   - 25b・25c は実施せず、roadmap の U-36 / U-37 として管理する(ユーザー判断)。CrowPanel で 25a のファームの起動と操作を確認済み(バッジは出ない)。
+
+## 2026-11-07 時点
+
+- **Phase 26(CrowPanel の I/O 基板 rev-a の確認と、電源の自己保持)完了。** 詳細は `docs/results/phase26.md`。Host API / ABI・`.wasm` は不変。
+  - I/O 基板の I2C(0x36 残量計 / 0x48 A/D、rev-a は RTC 未実装)、MIDI の IN / OUT、IO2 による電池の経路の切り替えを確認し、`docs/boards.md` に I/O 基板の節を足した。
+  - 電源の自己保持: 起動するたびに HOLD を上げる。2 秒の長押しで(押したまま)画面が消え、離すと電源が切れる。USB 給電中なら 1 秒後に戻る。電池だけで起動・保持・電源断ができる。
+  - **制約: 充電が DONE で止まることがある**(TP4059。電池が一度切り離されると再開しない)。当面は「電池で起動してから USB を挿す」(roadmap U-38)。
+  - 回帰は両ボードで 3 本 PASS。Waveshare の動きは不変(free_int −24B、`MIN_FREE_INT` との余裕 428B)。
+  - 後の段: 26a 残量計 / 26b ペダル / 26c 外付けの DAC(順番は未定)。
+  - 実機: 両ボードとも普段使いのファーム、共用の SD の検査用アプリは消した(SD は CrowPanel に挿してある)。

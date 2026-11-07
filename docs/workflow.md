@@ -273,6 +273,9 @@ pgrep -af kybotos_host                          # 残留なしを確認(何も�
 - **ポートはボードごとに `KYBOTOS_PORT_<BOARD>`(大文字)で、`/dev/serial/by-id/...` を指定する。** USB Serial/JTAG のボードを
   2 枚つなぐと `/dev/ttyACM0` / `1` の順番が挿す順で変わり、1 枚だけでも**どちらのボードも `/dev/ttyACM0` になる**
   (by-id の名前には MAC が入る。値は各自の環境なので repo には書かない)。未設定なら `KYBOTOS_PORT` → `/dev/ttyACM0` で、警告を出す。
+- **ボードを差し替えたら、前のボードのモニタのコンテナを止めてから焼く。** どちらのボードも `/dev/ttyACM0` になるので、残ったモニタが新しいボードに再接続して
+  ポートをつかみ、書き込みが `device reports readiness to read but returned no data (device disconnected or multiple access on port?)` で失敗する(Phase 26)。
+  止め方は §3.4 の「`monitor` を含むものだけ止める」と同じ。
 - **`fw.sh flash` は、ビルドの sdkconfig のボードが指定と違えば止まる。** 焼いたあとは起動ログの最初の `APP: board: <board>` を見る。
   **上の生のコマンドは常に既定のボードを焼く**ので、他のボードがつながっているときに使わない。
 - `KYBOTOS_DEV_APPS=1` / `0` を付けると `-DKYBOTOS_DEV_APPS=ON` / `OFF` を渡す(付けなければキャッシュの値のまま。§3.4)。
