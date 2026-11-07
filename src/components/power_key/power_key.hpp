@@ -16,6 +16,10 @@ struct PowerKeyConfig {
     uint32_t   force_home_min_ms  = 1000;        // Release after this = forced home (Phase 18a)
     uint32_t   poll_period_ms     = 10;          // Poll period when using a task
     bool       use_deepsleep_hold = true;        // Keep level during deep sleep after OFF
+    // Phase 26 (KB_PWR_HOLD_ALWAYS): latch HIGH at every boot; the long press drops it while pressed
+    // (the power goes on release) and restores it if still powered usb_check_ms after release. No deep sleep.
+    bool       hold_always        = false;
+    uint32_t   usb_check_ms       = 1000;
 };
 
 class PowerKey final {
@@ -50,6 +54,18 @@ public:
         force_home_arg_ = arg;
     }
 
+    // hold_always only. on_power_off: at hold_ms while still pressed, before the latch goes LOW
+    // (stop the app, darken the screen). on_power_restore: after release, when the board is still
+    // powered (external power) and the latch went back up. Both run on the power-key task and may block.
+    void set_on_power_off(ShortPressCb cb, void* arg) noexcept {
+        on_power_off_ = cb;
+        power_off_arg_ = arg;
+    }
+    void set_on_power_restore(ShortPressCb cb, void* arg) noexcept {
+        on_power_restore_ = cb;
+        power_restore_arg_ = arg;
+    }
+
     const PowerKeyConfig& config() const noexcept { return cfg_; }
     void set_config(const PowerKeyConfig& cfg) noexcept { cfg_ = cfg; }
 
@@ -58,6 +74,8 @@ private:
     bool read_raw() const noexcept;
     bool debounce_read() noexcept;
     void cut_latch_and_maybe_sleep() noexcept;
+    void power_off_while_pressed() noexcept;
+    void restore_after_release() noexcept;
     static inline void gpio_conf(gpio_num_t pin, gpio_mode_t mode) noexcept;
 
 private:
@@ -72,6 +90,11 @@ private:
     void*      short_press_arg_   = nullptr;
     ShortPressCb on_force_home_   = nullptr;
     void*      force_home_arg_    = nullptr;
+    ShortPressCb on_power_off_    = nullptr;
+    void*      power_off_arg_     = nullptr;
+    ShortPressCb on_power_restore_ = nullptr;
+    void*      power_restore_arg_ = nullptr;
+    bool       power_off_pending_ = false;  // hold_always: powered off at hold_ms, waiting for release
     volatile bool shutdown_issued_ = false;
     TaskHandle_t task_            = nullptr;
 };

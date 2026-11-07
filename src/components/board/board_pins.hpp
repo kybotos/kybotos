@@ -31,6 +31,15 @@
 #define PIN_PWR_LATCH GPIO_NUM_NC
 #endif
 
+// When the self-hold goes up (Phase 26). 0 (Waveshare): only when the key is held at boot (battery power);
+// on external power the latch is left alone and the long press does not power off.
+// 1 (CrowPanel + I/O board): always at boot, because the charger reaches the battery only through the
+// latched switch. The long press then powers off after the key is released, and if the board is still
+// running 1 s after the latch went down (USB power), the latch goes back up.
+#ifndef KB_PWR_HOLD_ALWAYS
+#define KB_PWR_HOLD_ALWAYS 0
+#endif
+
 // Battery voltage sensing (Phase 25). A board with a resistor divider from the battery to an ADC pin sets
 // KB_HAS_BATT_SENSE 1, PIN_BAT_ADC and KB_BAT_DIV_MUL (battery voltage = ADC voltage x KB_BAT_DIV_MUL).
 #ifndef KB_HAS_BATT_SENSE

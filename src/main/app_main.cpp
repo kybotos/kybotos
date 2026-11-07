@@ -44,10 +44,13 @@ extern "C" void app_main()
     cfg.hold_ms = 2000;          // Power off on 2-second long press
     cfg.poll_period_ms = 10;     // Poll every 10 ms
     cfg.use_deepsleep_hold = true;
+    cfg.hold_always = KB_PWR_HOLD_ALWAYS;   // Phase 26: CrowPanel + I/O board (board_pins.hpp)
 
     static PowerKey pwr{cfg};
     pwr.init();
-    pwr.start_task();
+    // Phase 26: the power-off path (logs + waiting for the app) overflowed 2048 B on the CrowPanel.
+    // Only KB_PWR_HOLD_ALWAYS boards take the larger stack, so the Waveshare internal RAM is unchanged.
+    pwr.start_task(5, KB_PWR_HOLD_ALWAYS ? 3072 : 2048);
     battery::SetExternalPower(!pwr.is_battery_mode());   // Phase 25a: the badge looks different on USB power
 #endif
 
@@ -100,7 +103,8 @@ extern "C" void app_main()
     // コールバックは power_key タスク(小スタック)上なので atomic 操作のみ。
     // 消灯中の短押しは「復帰」も兼ねる(要求フラグを立てるだけ。LVGL には触らない)
     // 電源キーの無いボード(KB_HAS_POWER_KEY 0)では、戻る / ホームはシリアルの key だけ(Phase 24)。
-    // ラッチの無いボード(CrowPanel の IO1 のキー)では、長押しの電源断は起きない(battery_mode にならない)
+    // ラッチの無いボードでは、長押しの電源断は起きない(battery_mode にならない)。
+    // KB_PWR_HOLD_ALWAYS のボード(CrowPanel + I/O 基板、Phase 26)は、2 秒の長押しのあと離したときに電源断。
 #if KB_HAS_POWER_KEY
     pwr.set_on_short_press([](void*) {
         wasmrt::screensaver_request_wake();
@@ -113,6 +117,19 @@ extern "C" void app_main()
     pwr.set_on_force_home([](void*) {
         wasmrt::screensaver_request_wake();
         wasmrt::app_request_force_home();
+    }, nullptr);
+
+    // Phase 26: 電源断(2 秒、押したまま)の前に実行中のアプリを止め(SD への書き込みを済ませるため。
+    // 最大 3 秒待ち、止まらなくても切る)、画面を消す。実際に電源が落ちるのはキーを離したとき。
+    // USB 給電中で切れなかったら画面を戻す。どちらも power_key タスクの上で動く。
+    pwr.set_on_power_off([](void*) {
+        wasmrt::app_request_force_home();
+        for (int i = 0; i < 300 && wasmrt::app_is_running(); i++) vTaskDelay(pdMS_TO_TICKS(10));
+        display_backlight_set(false);
+    }, nullptr);
+    pwr.set_on_power_restore([](void*) {
+        display_backlight_set(true);
+        wasmrt::screensaver_request_wake();
     }, nullptr);
 #endif
 

@@ -2,7 +2,8 @@
 // Selected by CONFIG_KYBOTOS_BOARD_CROWPANEL_ADV28 (board_pins.hpp). Phase 24.
 // Pins checked against the net names of the V1.2 schematic (docs/results/phase24.md 0-b).
 // Do not drive anything not listed here: GPIO14 (TFT_PWR, parts NC), GPIO45 (mic / wireless
-// switch, strapping pin), GPIO0/2/3/9/10/46 (wireless adapter) are left alone. GPIO1 is the home key.
+// switch, strapping pin), GPIO0/3/9/10/46 (wireless adapter) are left alone. GPIO1 / 2 are the
+// power key / self-hold of the I/O board (Phase 26).
 #pragma once
 
 // ---- LCD (ST7789, SPI2). No reset pin: the panel has its own RC reset ----
@@ -45,13 +46,18 @@
 #define PIN_AMP_EN     GPIO_NUM_21  // IO21_NS_CTRL. LOW = amplifier on (vendor example)
 #define KB_AMP_EN_ON_LEVEL 0
 
-// ---- Home key: a push switch between IO1 (J9 TX2, wireless adapter) and GND, internal pull-up ----
-// Same key handling as the Waveshare power key (short press = back, 1 s or more = forced home),
-// but there is no self-hold latch, so the long press does not power off.
+// ---- Power key and self-hold on the I/O board rev-a (on J8 / J9). Phase 26 ----
+// Key: push switch -> Schottky D1 -> IO1 (J9 TX2), about 0.3 V when pressed; internal pull-up (none on the board).
+// While pressed, the key also turns the battery path on through D1, regardless of the latch.
+// Latch: IO2 (J8 RX2) HIGH = battery path on (N-ch -> P-ch), 100k pull-down on the board, so it is off
+// during reset. The charger reaches the battery only while it is on, so it goes up at every boot.
+// Short press = back, 1-2 s = forced home, 2 s = power off after release (see KB_PWR_HOLD_ALWAYS).
 #define KB_HAS_POWER_KEY   1
-#define KB_HAS_POWER_LATCH 0
-#define KB_HAS_BATT_SENSE  0   // no battery sensing yet (Phase 25: Waveshare only)
+#define KB_HAS_POWER_LATCH 1
+#define KB_PWR_HOLD_ALWAYS 1
+#define KB_HAS_BATT_SENSE  0   // no battery sensing yet (the I/O board's fuel gauge: later phase)
 #define PIN_PWR_KEY_IN     GPIO_NUM_1
+#define PIN_PWR_LATCH      GPIO_NUM_2
 
 // ---- MIDI (UART1 on the J6 3.3V-UART1 connector; circuit to be wired in Phase 24c) ----
 #define PIN_MIDI_TX    GPIO_NUM_17

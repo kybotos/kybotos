@@ -52,6 +52,26 @@ void PowerKey::cut_latch_and_maybe_sleep() noexcept {
     }
 }
 
+// Phase 26 (hold_always), at hold_ms while the key is still pressed: stop the app, darken the screen and
+// drop the latch, like the Waveshare (latch LOW + deep sleep while pressed). The battery path stays on
+// through the key itself while it is pressed, so the power actually goes when the key is released.
+void PowerKey::power_off_while_pressed() noexcept {
+    ESP_LOGW(TAG, "PWR: long press >= %" PRIu32 " ms -> power off (cut on release)", cfg_.hold_ms);
+    if (on_power_off_) on_power_off_(power_off_arg_);   // stop the app and wait, backlight off
+    gpio_set_level(cfg_.latch_pin, 0);
+    ESP_LOGW(TAG, "PWR: hold OFF");
+}
+
+// Released after power_off_while_pressed() and still running usb_check_ms later: external power (USB)
+// keeps the board up. Restore the hold so the battery charges, and bring the screen back.
+void PowerKey::restore_after_release() noexcept {
+    vTaskDelay(pdMS_TO_TICKS(cfg_.usb_check_ms));
+    gpio_set_level(cfg_.latch_pin, 1);
+    ESP_LOGW(TAG, "PWR: still powered %" PRIu32 " ms after release (external power) -> hold ON again",
+             cfg_.usb_check_ms);
+    if (on_power_restore_) on_power_restore_(power_restore_arg_);
+}
+
 void PowerKey::init() noexcept {
     // Input pin
     gpio_conf(cfg_.key_pin, GPIO_MODE_INPUT);
@@ -76,6 +96,21 @@ void PowerKey::init() noexcept {
 
     // Self-hold pin
     gpio_conf(cfg_.latch_pin, GPIO_MODE_OUTPUT);
+
+    // Phase 26 (CrowPanel + I/O board): hold at every boot, as early as possible. The key must be held
+    // until here when starting on battery; on USB the hold is what lets the charger reach the battery.
+    if (cfg_.hold_always) {
+        gpio_set_level(cfg_.latch_pin, 1);
+        battery_mode_ = read_raw();   // key held at boot = started on battery (informational)
+        ESP_LOGI(TAG, "PWR: hold ON at boot (%s)",
+                 battery_mode_ ? "key pressed: battery start" : "no key: external power start");
+        raw_prev_       = read_raw();
+        raw_edge_ts_    = xTaskGetTickCount();
+        pressed_stable_ = raw_prev_;
+        press_start_    = 0;
+        shutdown_issued_= false;
+        return;
+    }
 
     // Start with latch=LOW to stabilize
     gpio_set_level(cfg_.latch_pin, 0);
@@ -114,7 +149,12 @@ void PowerKey::poll() noexcept {
         if (press_armed_ && press_start_ == 0) {
             press_start_ = now; // start of stable press
         }
-        if (battery_mode_ && press_start_ != 0) {
+        if (cfg_.hold_always && press_start_ != 0 && !power_off_pending_) {
+            if (pdTICKS_TO_MS(now - press_start_) >= cfg_.hold_ms) {
+                power_off_pending_ = true;
+                power_off_while_pressed();
+            }
+        } else if (!cfg_.hold_always && battery_mode_ && press_start_ != 0) {
             const uint32_t held_ms = pdTICKS_TO_MS(now - press_start_);
             if (held_ms >= cfg_.hold_ms) {
                 // Power off immediately when threshold is reached
@@ -122,7 +162,11 @@ void PowerKey::poll() noexcept {
             }
         }
     } else {
-        if (press_start_ != 0) {
+        if (power_off_pending_) {
+            power_off_pending_ = false;
+            press_start_ = 0;
+            restore_after_release();   // reached only on external power
+        } else if (press_start_ != 0) {
             const uint32_t held_ms = pdTICKS_TO_MS(now - press_start_);
             if (held_ms <= cfg_.short_press_max_ms) {
                 if (on_short_press_) on_short_press_(short_press_arg_);
