@@ -356,6 +356,7 @@ largest free block / WARN・ERROR / シナリオの合否を集計して Markdow
 
 - **最初に `ls` で `APPS` がすべて SD にあるかを確かめる**。無ければ「`KYBOTOS_DEV_APPS=ON` のファームか」を案内して止まる。
 - **ON のファームを焼くと検査用・診断用アプリが SD に置かれ、OFF のファームに戻しても残る**(ファームは SD のアプリを消さない)。
+- **新しい SD は PC で FAT32(MBR、区画 1 つ)にフォーマットするだけでよい**(ファームはフォーマットしない)。初回の起動でファームが `/sdcard/apps`(埋め込みのアプリ)・`/sdcard/music`(検証用の MP3)・`/sdcard/data` を作る。ファームに埋め込んでいないアプリ(この repo の外のアプリ)は手で置く(Phase 26a)。
   普段使いの OFF に戻したら、シリアルの **`rm <app>`** で消す(hostapi_check / midi_loopback / synth_probe)。
 
 **シナリオ**(Phase 22): conf の `SCENARIO[<app>]` に `;` 区切りで書く。実行部は `scripts/regress-scenario.sh`
