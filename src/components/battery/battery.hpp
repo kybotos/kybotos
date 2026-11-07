@@ -8,7 +8,8 @@
 //
 // Phase 26a: KB_BATT_SRC_FUEL_GAUGE (CrowPanel + I/O board) reads a MAX17048 on the touch I2C bus instead:
 // voltage = VCELL, charge = the chip's SOC. Init() does nothing there; AttachI2cBus() (after the touch driver
-// made the bus) probes the chip and starts the task. The charge/discharge rate (CRATE) also drives
+// made the bus) probes the chip, and PollGauge() reads it (called by the badge timer in the LVGL task; no task of
+// its own, to save internal RAM). The charge/discharge rate (CRATE) also drives
 // ExternalPower(): charging -> external power, discharging -> battery.
 //
 // Limits (docs/results/phase25.md):
@@ -33,9 +34,13 @@ void Init();
 bool Get(Reading* out);
 
 // Phase 26a: fuel-gauge boards only. Adds the gauge to the given I2C bus (i2c_master_bus_handle_t), checks that it
-// answers (logs the result) and starts the reading task. Call once from app_main after Touch::init().
+// answers (logs the result) and takes the first reading. Call once from app_main after Touch::init().
 // No-op on other boards or with a null bus.
 void AttachI2cBus(void* i2c_bus);
+
+// Phase 26a: reads the fuel gauge once (VCELL / SOC / CRATE, ~1 ms of I2C) and updates Get() / ExternalPower().
+// Called every 2 s from the battery badge timer (LVGL task). No-op on other boards or if the gauge did not answer.
+void PollGauge();
 
 // Phase 26a: extra values from the fuel gauge (for the serial "batt"). Returns false on other boards / no sample yet.
 struct GaugeReading {

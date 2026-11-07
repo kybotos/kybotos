@@ -17,6 +17,7 @@ bool s_suppressed = false;   // スクリーンセーバー / 消灯の間 true(
 
 void update_cb(lv_timer_t*)
 {
+    battery::PollGauge();   // Phase 26a: the fuel gauge is read here (no-op on ADC boards)
     battery::Reading r;
     if (s_suppressed || !battery::Get(&r)) {
         lv_obj_add_flag(s_label, LV_OBJ_FLAG_HIDDEN);
